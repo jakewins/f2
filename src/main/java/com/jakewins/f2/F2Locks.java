@@ -20,8 +20,14 @@ enum AcquireOutcome {
 }
 
 public class F2Locks implements Locks {
+    private final F2Partitions partitions;
+
+    public F2Locks(ResourceType[] resourceTypes, int numPartitions) {
+        this.partitions = new F2Partitions(resourceTypes.length, numPartitions);
+    }
+
     public Client newClient() {
-        return new F2LockClient();
+        return new F2LockClient(partitions);
     }
 
     public void close() {

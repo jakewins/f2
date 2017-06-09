@@ -4,10 +4,14 @@ import com.jakewins.f2.include.AcquireLockTimeoutException;
 import com.jakewins.f2.include.Locks;
 import com.jakewins.f2.include.ResourceType;
 
-/**
- * Created by jakewins on 6/9/17.
- */
 class F2LockClient implements Locks.Client {
+
+    private final F2Partitions partitions;
+
+    F2LockClient(F2Partitions partitions) {
+        this.partitions = partitions;
+    }
+
     public void acquireShared(ResourceType resourceType, long resourceId) throws AcquireLockTimeoutException {
         acquire(AcquireMode.BLOCKING, LockMode.SHARED, resourceType, resourceId);
     }
@@ -58,10 +62,23 @@ class F2LockClient implements Locks.Client {
     }
 
     private AcquireOutcome acquire(AcquireMode acquireMode, LockMode mode, ResourceType resourceType, long resourceId) {
+        LockEntry entry = newLockEntry(mode, resourceType, resourceId);
+        F2Partition partition = partitions.getPartition(resourceId);
+
+        F2Lock.Outcome outcome = partition.acquire(acquireMode, entry);
+
         return null;
     }
 
     private void release(LockMode lockMode, ResourceType resourceType, long resourceId) {
 
+    }
+
+    private LockEntry newLockEntry(LockMode mode, ResourceType resourceType, long resourceId) {
+        LockEntry entry = new LockEntry();
+        entry.lockMode = mode;
+        entry.resourceType = resourceType;
+        entry.resourceId = resourceId;
+        return entry;
     }
 }

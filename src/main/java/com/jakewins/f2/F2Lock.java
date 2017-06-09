@@ -1,8 +1,5 @@
 package com.jakewins.f2;
 
-/**
- * Created by jakewins on 6/9/17.
- */
 class F2Lock {
     enum Outcome {
         ACQUIRED,
@@ -20,10 +17,18 @@ class F2Lock {
     /** Linked list of waiting holders */
     private LockEntry waitList = null;
 
+    Outcome acquire(AcquireMode acquireMode, LockEntry entry) {
+        if(entry.lockMode == LockMode.EXCLUSIVE) {
+            return exclusiveLock(acquireMode, entry);
+        } else {
+            return sharedLock(acquireMode, entry);
+        }
+    }
+
     // NOTE: Must hold partition lock before calling
-    public Outcome sharedLock(LockEntry entry, AcquireMode mode) {
+    private Outcome sharedLock(AcquireMode acquireMode, LockEntry entry) {
         if(exclusiveHolder != null) {
-            return handleAcquireFailed(entry, mode);
+            return handleAcquireFailed(entry, acquireMode);
         }
 
         entry.nextHolder = sharedHolderList;
@@ -32,9 +37,9 @@ class F2Lock {
     }
 
     // NOTE: Must hold partition lock before calling
-    public Outcome exclusiveLock(LockEntry entry, AcquireMode mode) {
+    private Outcome exclusiveLock(AcquireMode acquireMode, LockEntry entry) {
         if(exclusiveHolder != null || sharedHolderList != null) {
-            return handleAcquireFailed(entry, mode);
+            return handleAcquireFailed(entry, acquireMode);
         }
 
         exclusiveHolder = entry;

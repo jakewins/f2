@@ -55,7 +55,10 @@ public class F2Lock_Test {
 
 
     private static Function<F2Lock, Outcome> sharedLock(LockEntry entry, AcquireMode mode) {
-        return (l) -> l.sharedLock(entry, mode);
+        return (l) -> {
+            entry.lockMode = LockMode.SHARED;
+            return l.acquire(mode, entry);
+        };
     }
     private static Function<F2Lock, Outcome> sharedLock(AcquireMode mode) {
         return sharedLock(new LockEntry(), mode);
@@ -63,7 +66,10 @@ public class F2Lock_Test {
     private static Function<F2Lock, Outcome> sharedLock = sharedLock(new LockEntry(), BLOCKING);
 
     private static Function<F2Lock, Outcome> exclusiveLock(LockEntry entry, AcquireMode mode) {
-        return (l) -> l.exclusiveLock(entry, mode);
+        return (l) -> {
+            entry.lockMode = LockMode.EXCLUSIVE;
+            return l.acquire(mode, entry);
+        };
     }
     private static Function<F2Lock, Outcome> exclusiveLock(AcquireMode mode) {
         return exclusiveLock(new LockEntry(), mode);
