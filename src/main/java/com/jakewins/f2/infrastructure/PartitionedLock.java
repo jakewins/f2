@@ -1,4 +1,4 @@
-package com.jakewins.f2;
+package com.jakewins.f2.infrastructure;
 
 import java.util.concurrent.locks.StampedLock;
 
