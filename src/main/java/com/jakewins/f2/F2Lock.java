@@ -1,15 +1,21 @@
 package com.jakewins.f2;
 
 
-import static com.jakewins.f2.F2Lock.Outcome.ACQUIRED;
-import static com.jakewins.f2.F2Lock.Outcome.MUST_WAIT;
-import static com.jakewins.f2.F2Lock.Outcome.NOT_ACQUIRED;
+import static com.jakewins.f2.F2Lock.AcquireOutcome.ACQUIRED;
+import static com.jakewins.f2.F2Lock.AcquireOutcome.MUST_WAIT;
+import static com.jakewins.f2.F2Lock.AcquireOutcome.NOT_ACQUIRED;
+import static com.jakewins.f2.F2Lock.ReleaseOutcome.LOCK_IDLE;
+import static com.jakewins.f2.F2Lock.ReleaseOutcome.LOCK_HELD;
 
 class F2Lock {
-    enum Outcome {
+    enum AcquireOutcome {
         ACQUIRED,
         NOT_ACQUIRED,
         MUST_WAIT
+    }
+    enum ReleaseOutcome {
+        LOCK_HELD,
+        LOCK_IDLE
     }
 
     /** Single entry of current exclusive holder */
@@ -33,11 +39,11 @@ class F2Lock {
      * @param entry the client entry to add to the lock
      * @return the outcome; grabbed, not grabbed, or on wait list
      */
-    Outcome acquire(AcquireMode acquireMode, F2ClientEntry entry) {
+    AcquireOutcome acquire(AcquireMode acquireMode, F2ClientEntry entry) {
         if(entry.lockMode == LockMode.EXCLUSIVE) {
-            return exclusiveLock(acquireMode, entry);
+            return acquireExclusive(acquireMode, entry);
         } else {
-            return sharedLock(acquireMode, entry);
+            return acquireShared(acquireMode, entry);
         }
     }
 
@@ -46,9 +52,9 @@ class F2Lock {
      * NOTE: Must hold partition lock before calling
      * @param entry the client's entry with this lock
      */
-    void release(F2ClientEntry entry) {
+    ReleaseOutcome release(F2ClientEntry entry) {
         if(entry.lockMode == LockMode.EXCLUSIVE) {
-            throw new UnsupportedOperationException("not implemented");
+            return releaseExclusive(entry);
         } else {
             throw new UnsupportedOperationException("not implemented");
         }
@@ -64,12 +70,11 @@ class F2Lock {
      * NOTE: Must hold partition lock before calling
      * @param entry the lock entry to clear out
      */
-    void errorCleanup(F2ClientEntry entry) {
+    ReleaseOutcome errorCleanup(F2ClientEntry entry) {
         if(entry.lockMode == LockMode.EXCLUSIVE) {
             // Check that this entry hasn't been granted the lock
             if(exclusiveHolder == entry) {
-                release(entry);
-                return;
+                return release(entry);
             }
         } else {
             // Check that this entry hasn't already been granted the shared lock
@@ -77,12 +82,108 @@ class F2Lock {
             while(current != null) {
                 if(current == entry) {
                     // This entry holds a share lock; needs to cleanly release it
-                    release(entry);
-                    return;
+                    return release(entry);
                 }
             }
         }
         removeFromWaitList(entry);
+        if(exclusiveHolder == null && sharedHolderList == null) {
+            return LOCK_IDLE;
+        }
+        return LOCK_HELD;
+    }
+
+    private AcquireOutcome acquireShared(AcquireMode acquireMode, F2ClientEntry entry) {
+        if(exclusiveHolder != null) {
+            return handleAcquireFailed(entry, acquireMode);
+        }
+
+        entry.next = sharedHolderList;
+        sharedHolderList = entry;
+        return ACQUIRED;
+    }
+
+    private AcquireOutcome acquireExclusive(AcquireMode acquireMode, F2ClientEntry entry) {
+        if(exclusiveHolder != null || sharedHolderList != null) {
+            return handleAcquireFailed(entry, acquireMode);
+        }
+
+        exclusiveHolder = entry;
+        return ACQUIRED;
+    }
+
+    private AcquireOutcome handleAcquireFailed(F2ClientEntry entry, AcquireMode mode) {
+        if(mode == AcquireMode.BLOCKING) {
+            entry.next = null;
+            if(waitList == null) {
+                waitList = entry;
+                return MUST_WAIT;
+            }
+
+            F2ClientEntry current;
+            for(current = waitList; current.next != null; ) {
+                current = current.next;
+            }
+
+            current.next = entry;
+            return MUST_WAIT;
+        }
+        return NOT_ACQUIRED;
+    }
+
+    private ReleaseOutcome releaseExclusive(F2ClientEntry entry) {
+        assert exclusiveHolder == entry : String.format("%s releasing exclusive lock held by %s.", entry, exclusiveHolder);
+
+        exclusiveHolder = null;
+
+        // TODO: Handle upgrade lock (eg. same client is on shared lock list (or?))
+        return grantLockToWaiters();
+    }
+
+    /**
+     * Hand the lock over to whoever is waiting for the lock; possibly many waiters if there's a list of clients
+     * that all want a shared lock.
+     * @return LOCK_IDLE if there was nobody waiting to get the lock, or LOCK_HELD if there was at least one waiter
+     */
+    private ReleaseOutcome grantLockToWaiters() {
+        F2ClientEntry nextWaiter;
+        ReleaseOutcome outcome = LOCK_IDLE;
+        for(;;) {
+            nextWaiter = waitList;
+            if(nextWaiter == null) {
+                return outcome;
+            }
+            if(nextWaiter.lockMode == LockMode.EXCLUSIVE) {
+                if(outcome != LOCK_IDLE) {
+                    // If the outcome has been marked as not idle, there are already shared grantees;
+                    // meaning we can't grant this exclusive lock. Stop granting and return.
+                    return outcome;
+                }
+
+                // Remove from wait list
+                waitList = nextWaiter.next;
+
+                // Mark as exclusive owner
+                exclusiveHolder = nextWaiter;
+
+                // Signal the waiting client
+                nextWaiter.owner.latch.release();
+                return LOCK_HELD;
+            } else {
+                // Highlight that the lock has at least one new holder
+                outcome = LOCK_HELD;
+
+                // Remove from wait list
+                waitList = nextWaiter.next;
+
+                // Add to shared list
+                nextWaiter.next = sharedHolderList;
+                sharedHolderList = nextWaiter;
+
+                // Signal the waiting client
+                nextWaiter.owner.latch.release();
+            }
+        }
     }
 
     private void removeFromWaitList(F2ClientEntry entry) {
@@ -101,44 +202,5 @@ class F2Lock {
         }
 
         assert false : "Asked to remove client from wait list, but client was not on it.";
-    }
-
-    private Outcome sharedLock(AcquireMode acquireMode, F2ClientEntry entry) {
-        if(exclusiveHolder != null) {
-            return handleAcquireFailed(entry, acquireMode);
-        }
-
-        entry.next = sharedHolderList;
-        sharedHolderList = entry;
-        return ACQUIRED;
-    }
-
-    private Outcome exclusiveLock(AcquireMode acquireMode, F2ClientEntry entry) {
-        if(exclusiveHolder != null || sharedHolderList != null) {
-            return handleAcquireFailed(entry, acquireMode);
-        }
-
-        exclusiveHolder = entry;
-        return ACQUIRED;
-    }
-
-
-    private Outcome handleAcquireFailed(F2ClientEntry entry, AcquireMode mode) {
-        if(mode == AcquireMode.BLOCKING) {
-            entry.next = null;
-            if(waitList == null) {
-                waitList = entry;
-                return MUST_WAIT;
-            }
-
-            F2ClientEntry current;
-            for(current = waitList; current.next != null; ) {
-                current = current.next;
-            }
-
-            current.next = entry;
-            return MUST_WAIT;
-        }
-        return NOT_ACQUIRED;
     }
 }

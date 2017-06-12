@@ -8,10 +8,11 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 class F2Client implements Locks.Client {
+    private static final int CHECK_DEADLOCK_AFTER_MS = 1000;
 
     private final F2Partitions partitions;
-    private final Semaphore latch = new Semaphore(0);
-    private static final int CHECK_DEADLOCK_AFTER_MS = 1000;
+
+    Semaphore latch = new Semaphore(0);
 
     F2Client(F2Partitions partitions) {
         this.partitions = partitions;
@@ -34,11 +35,11 @@ class F2Client implements Locks.Client {
     }
 
     public boolean trySharedLock(ResourceType resourceType, long resourceId) {
-        return acquire(AcquireMode.NONBLOCKING, LockMode.SHARED, resourceType, resourceId) == AcquireOutcome.ACQUIRED;
+        return acquire(AcquireMode.NONBLOCKING, LockMode.SHARED, resourceType, resourceId) == com.jakewins.f2.AcquireOutcome.ACQUIRED;
     }
 
     public boolean tryExclusiveLock(ResourceType resourceType, long resourceId) {
-        return acquire(AcquireMode.NONBLOCKING, LockMode.EXCLUSIVE, resourceType, resourceId) == AcquireOutcome.ACQUIRED;
+        return acquire(AcquireMode.NONBLOCKING, LockMode.EXCLUSIVE, resourceType, resourceId) == com.jakewins.f2.AcquireOutcome.ACQUIRED;
     }
 
     public boolean reEnterShared(ResourceType resourceType, long resourceId) {
@@ -73,7 +74,7 @@ class F2Client implements Locks.Client {
         F2ClientEntry entry = partition.newClientEntry(this, mode, resourceType, resourceId);
 
         F2Lock lock;
-        F2Lock.Outcome outcome;
+        F2Lock.AcquireOutcome outcome;
         long stamp = partition.partitionLock.writeLock();
         try {
             lock = partition.putIfAbsent(resourceType, resourceId, newLock);
@@ -86,20 +87,20 @@ class F2Client implements Locks.Client {
 
             outcome = lock.acquire(acquireMode, entry);
 
-            if(outcome == F2Lock.Outcome.ACQUIRED) {
-                return AcquireOutcome.ACQUIRED;
+            if(outcome == F2Lock.AcquireOutcome.ACQUIRED) {
+                return com.jakewins.f2.AcquireOutcome.ACQUIRED;
             }
 
-            if(outcome == F2Lock.Outcome.NOT_ACQUIRED) {
+            if(outcome == F2Lock.AcquireOutcome.NOT_ACQUIRED) {
                 partition.releaseClientEntry(entry);
-                return AcquireOutcome.NOT_ACQUIRED;
+                return com.jakewins.f2.AcquireOutcome.NOT_ACQUIRED;
             }
         } finally {
             partition.partitionLock.unlock(stamp);
         }
 
         try {
-            assert outcome == F2Lock.Outcome.MUST_WAIT;
+            assert outcome == F2Lock.AcquireOutcome.MUST_WAIT;
             // At this point, we are on the wait list for the lock we want, and we *have* to wait for it.
             // The way this works is that, eventually, someone ahead of us on the wait list will grant us the lock
             // and wake us up via {@link latch}. Until then, we wait.
