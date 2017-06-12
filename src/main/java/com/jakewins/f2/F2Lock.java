@@ -56,7 +56,7 @@ class F2Lock {
         if(entry.lockMode == LockMode.EXCLUSIVE) {
             return releaseExclusive(entry);
         } else {
-            throw new UnsupportedOperationException("not implemented");
+            return releaseShared(entry);
         }
     }
 
@@ -138,6 +138,25 @@ class F2Lock {
 
         // TODO: Handle upgrade lock (eg. same client is on shared lock list (or?))
         return grantLockToWaiters();
+    }
+
+    private ReleaseOutcome releaseShared(F2ClientEntry entry) {
+        if(sharedHolderList == entry) {
+            sharedHolderList = entry.next;
+        } else {
+            for(F2ClientEntry current = sharedHolderList; current.next != null; current = current.next) {
+                if(current.next == entry) {
+                    current.next = entry.next;
+                    break;
+                }
+            }
+        }
+
+        entry.next = null;
+        if(sharedHolderList == null) {
+            return grantLockToWaiters();
+        }
+        return LOCK_HELD;
     }
 
     /**

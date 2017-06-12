@@ -81,7 +81,16 @@ public class F2Lock_Test {
         testErrorCleanup(
                 given(exclusiveLock(currentHolder)),
                 currentHolder,
-                then(noExclusiveHolder, waitListIsEmpty));
+                then(noExclusiveHolder));
+    }
+
+    @Test
+    public void testCleanupGrantedShared() {
+        F2ClientEntry currentHolder = new F2ClientEntry();
+        testErrorCleanup(
+                given(sharedLock(currentHolder)),
+                currentHolder,
+                then(noSharedHolder));
     }
 
     private void testAcquire(Consumer<F2Lock> setup, Function<F2Lock, AcquireOutcome> actionUnderTest, AcquireOutcome expectedOutcome) {
@@ -139,8 +148,9 @@ public class F2Lock_Test {
         return lock -> asList(assertion).forEach(a -> a.accept(lock));
     }
 
-    private static Consumer<F2Lock> waitListIsEmpty = (lock) -> { assert lock.waitList == null : "Wait list should be empty"; };
+    private static Consumer<F2Lock> waitListIsEmpty = (lock) -> { assert lock.waitList == null : "There should be no wait list, found " + lock.waitList; };
     private static Consumer<F2Lock> noExclusiveHolder = (lock) -> { assert lock.exclusiveHolder == null : "There should be no exclusive holder, found " + lock.exclusiveHolder; };
+    private static Consumer<F2Lock> noSharedHolder = (lock) -> { assert lock.sharedHolderList == null : "There should be shared holder, found " + lock.sharedHolderList; };
     private static Consumer<F2Lock> lockIsHeldExclusivelyBy(F2ClientEntry holder) {
         return (lock) -> { assert lock.exclusiveHolder == holder : "Lock should be held by " + holder; };
     }
