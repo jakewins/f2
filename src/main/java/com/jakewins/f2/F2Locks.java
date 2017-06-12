@@ -1,6 +1,5 @@
 package com.jakewins.f2;
 
-import com.jakewins.f2.include.AcquireLockTimeoutException;
 import com.jakewins.f2.include.Locks;
 import com.jakewins.f2.include.ResourceType;
 
@@ -16,7 +15,8 @@ enum AcquireMode {
 
 enum AcquireOutcome {
     ACQUIRED,
-    NOT_ACQUIRED
+    NOT_ACQUIRED,
+    TIMEOUT
 }
 
 public class F2Locks implements Locks {
@@ -27,7 +27,7 @@ public class F2Locks implements Locks {
     }
 
     public Client newClient() {
-        return new F2LockClient(partitions);
+        return new F2Client(partitions);
     }
 
     public void close() {

@@ -1,5 +1,7 @@
 package com.jakewins.f2;
 
+import com.jakewins.f2.include.ResourceType;
+
 import java.util.HashMap;
 import java.util.concurrent.locks.StampedLock;
 
@@ -16,7 +18,10 @@ class SomeFastMapImplementation {
  * F2 locks are split into partitions; operations within a partition must be guarded by the partition lock.
  */
 class F2Partition {
+    // TODO: Get a view of the approximate max number of CPU instructions a holder of this might want, and how often Linux will reschedule
     StampedLock partitionLock = new StampedLock();
+    F2Lock nextFreeLock = null;
+    F2ClientEntry nextFreeClientEntry = null;
 
     private final SomeFastMapImplementation[] locks;
 
@@ -29,15 +34,39 @@ class F2Partition {
         }
     }
 
-    /** Must hold {@link #partitionLock} */
-    F2Lock.Outcome acquire(AcquireMode acquireMode, LockEntry entry) {
-        SomeFastMapImplementation map = locks[entry.resourceType.typeId()];
-        // TODO freelist, these will stay for long-ish periods, meaning they likely get promoted, meaning they will cause fragmentation
-        // hence, keep a freelist per partition instead.
-        F2Lock newLock = new F2Lock();
+    /**
+     * NOTE: Must hold {@link #partitionLock}
+     */
+    F2Lock putIfAbsent(ResourceType resourceType, long resourceId, F2Lock newLock) {
+        SomeFastMapImplementation map = locks[resourceType.typeId()];
+        return map.putIfAbsent(resourceId, newLock);
+    }
 
-        F2Lock lock = map.putIfAbsent(entry.resourceId, newLock);
-        return lock.acquire(acquireMode, entry);
+    /**
+     * NOTE: Must hold {@link #partitionLock}
+     */
+    F2ClientEntry newClientEntry(F2Client owner, LockMode lockMode, ResourceType resourceType, long resourceId) {
+        F2ClientEntry entry = nextFreeClientEntry != null ? nextFreeClientEntry : new F2ClientEntry();
+        nextFreeClientEntry = entry.next;
+
+        entry.owner = owner;
+        entry.lockMode = lockMode;
+        entry.resourceType = resourceType;
+        entry.resourceId = resourceId;
+
+        return entry;
+    }
+
+    /**
+     * NOTE: Must hold {@link #partitionLock}
+     */
+    void releaseClientEntry(F2ClientEntry entry) {
+        entry.owner = null;
+        entry.lockMode = null;
+        entry.resourceType = null;
+        entry.resourceId = -1;
+        entry.next = nextFreeClientEntry;
+        nextFreeClientEntry = entry;
     }
 }
 
