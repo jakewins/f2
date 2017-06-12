@@ -4,7 +4,7 @@ A concurrent lock manager with automatic deadlock detection.
 
 ## Overview
 
-Good place to start reading is in [F2Client#acquire](src/main/java/com/jakewins/f2/F2Client).
+Good place to start reading is in [F2Client#acquire](src/main/java/com/jakewins/f2/F2Client.java).
 
 
 The design is inspired by the lock manager in postgres; the locks are grouped into partitions, and each partition
