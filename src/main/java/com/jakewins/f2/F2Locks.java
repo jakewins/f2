@@ -21,13 +21,15 @@ enum AcquireOutcome {
 
 public class F2Locks implements Locks {
     private final F2Partitions partitions;
+    private final DeadlockDetector deadlockDetector;
 
     public F2Locks(ResourceType[] resourceTypes, int numPartitions) {
         this.partitions = new F2Partitions(resourceTypes.length, numPartitions);
+        this.deadlockDetector = new DeadlockDetector();
     }
 
     public Client newClient() {
-        return new F2Client(partitions);
+        return new F2Client(partitions, deadlockDetector);
     }
 
     public void close() {

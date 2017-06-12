@@ -1,6 +1,8 @@
 package com.jakewins.f2;
 
 
+import com.jakewins.f2.include.ResourceType;
+
 import static com.jakewins.f2.F2Lock.AcquireOutcome.ACQUIRED;
 import static com.jakewins.f2.F2Lock.AcquireOutcome.MUST_WAIT;
 import static com.jakewins.f2.F2Lock.AcquireOutcome.NOT_ACQUIRED;
@@ -18,6 +20,12 @@ class F2Lock {
         LOCK_IDLE
     }
 
+    /** The type of resource this lock guards */
+    ResourceType resourceType;
+
+    /** The id of the resource this lock guards */
+    long resourceId;
+
     /** Single entry of current exclusive holder */
     F2ClientEntry exclusiveHolder = null;
 
@@ -28,7 +36,7 @@ class F2Lock {
     F2ClientEntry waitList = null;
 
     /** When on a freelist, next free lock after this one */
-    F2Lock nextFree;
+    F2Lock next;
 
     /**
      * Try to acquire this lock. If that's not currently possible, then acquireMode determines if the entry will be
@@ -93,6 +101,12 @@ class F2Lock {
         return LOCK_HELD;
     }
 
+    @Override
+    public String toString() {
+        return "Lock(" + resourceType.name() +
+                "[" + resourceId + "])";
+    }
+
     private AcquireOutcome acquireShared(AcquireMode acquireMode, F2ClientEntry entry) {
         if(exclusiveHolder != null) {
             return handleAcquireFailed(entry, acquireMode);
@@ -100,6 +114,9 @@ class F2Lock {
 
         entry.next = sharedHolderList;
         sharedHolderList = entry;
+
+        entry.lock = this;
+
         return ACQUIRED;
     }
 
@@ -109,12 +126,17 @@ class F2Lock {
         }
 
         exclusiveHolder = entry;
+
+        entry.lock = this;
+
         return ACQUIRED;
     }
 
     private AcquireOutcome handleAcquireFailed(F2ClientEntry entry, AcquireMode mode) {
         if(mode == AcquireMode.BLOCKING) {
             entry.next = null;
+            entry.lock = this;
+
             if(waitList == null) {
                 waitList = entry;
                 return MUST_WAIT;
@@ -220,6 +242,6 @@ class F2Lock {
             current = current.next;
         }
 
-        assert false : "Asked to remove client from wait list, but client was not on it.";
+        assert false : "Asked to removeLock client from wait list, but client was not on it.";
     }
 }

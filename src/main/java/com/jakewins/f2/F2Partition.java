@@ -12,6 +12,10 @@ class SomeFastMapImplementation {
     F2Lock putIfAbsent(long resourceId, F2Lock toInsert) {
         return map.putIfAbsent(resourceId, toInsert);
     }
+
+    F2Lock remove(long resourceId) {
+        return map.remove(resourceId);
+    }
 }
 
 /**
@@ -20,8 +24,9 @@ class SomeFastMapImplementation {
 class F2Partition {
     // TODO: Get a view of the approximate max number of CPU instructions a holder of this might want, and how often Linux will reschedule
     StampedLock partitionLock = new StampedLock();
-    F2Lock nextFreeLock = null;
-    F2ClientEntry nextFreeClientEntry = null;
+
+    private F2Lock nextFreeLock = null;
+    private F2ClientEntry nextFreeClientEntry = null;
 
     private final SomeFastMapImplementation[] locks;
 
@@ -37,9 +42,36 @@ class F2Partition {
     /**
      * NOTE: Must hold {@link #partitionLock}
      */
-    F2Lock putIfAbsent(ResourceType resourceType, long resourceId, F2Lock newLock) {
+    F2Lock getOrCreate(ResourceType resourceType, long resourceId) {
         SomeFastMapImplementation map = locks[resourceType.typeId()];
-        return map.putIfAbsent(resourceId, newLock);
+        F2Lock lock = map.putIfAbsent(resourceId, nextFreeLock != null ? nextFreeLock : new F2Lock());
+
+        if(lock == nextFreeLock) {
+            nextFreeLock = lock.next;
+        }
+
+        lock.resourceType = resourceType;
+        lock.resourceId = resourceId;
+
+        return lock;
+    }
+
+    /**
+     * Remove a lock that is no longer in use. Client must
+     *
+     * NOTE: Must hold {@link #partitionLock}
+     */
+    void removeLock(ResourceType resourceType, long resourceId) {
+        SomeFastMapImplementation map = locks[resourceType.typeId()];
+        F2Lock lock = map.remove(resourceId);
+
+        assert lock.sharedHolderList == null : String.format("Removed lock with shared holders: %s ", lock.sharedHolderList);
+        assert lock.exclusiveHolder == null : String.format("Removed lock with exclusive holder: %s ", lock.exclusiveHolder);
+        assert lock.waitList == null : String.format("Removed lock with wait list! %s ", lock.waitList);
+
+        // TODO: Some operations could feasibly temporarily allocate like a hundred million locks; should cap freelist
+        lock.next = nextFreeLock;
+        nextFreeLock = lock;
     }
 
     /**
@@ -72,6 +104,8 @@ class F2Partition {
 
 class F2Partitions {
     private final F2Partition[] partitions;
+    /** During stop-the-world, stores a lock stamp from each partition lock */
+    private final long[] stopTheWorldLockStamps;
     private final int bitwiseModulo;
 
     F2Partitions(int numResourceTypes, int numPartitions) {
@@ -79,6 +113,7 @@ class F2Partitions {
 
         this.bitwiseModulo = numPartitions - 1;
         this.partitions = new F2Partition[numPartitions];
+        this.stopTheWorldLockStamps = new long[numPartitions];
         for(int partition = 0; partition < numPartitions; partition++) {
             this.partitions[partition] = new F2Partition(numResourceTypes);
         }
@@ -86,5 +121,19 @@ class F2Partitions {
 
     F2Partition getPartition(long resourceId) {
         return partitions[Long.hashCode(resourceId) & bitwiseModulo];
+    }
+
+    /** Lock every partition lock in  order of partition id (so this can be done without deadlocks */
+    void stopTheWorld() {
+        for(int partitionIndex=0;partitionIndex < partitions.length;partitionIndex++) {
+            this.stopTheWorldLockStamps[partitionIndex] = this.partitions[partitionIndex].partitionLock.writeLock();
+        }
+    }
+
+    /** Resume spinning */
+    void resumeTheWorld() {
+        for(int partitionIndex=0;partitionIndex < partitions.length;partitionIndex++) {
+            this.partitions[partitionIndex].partitionLock.unlock(this.stopTheWorldLockStamps[partitionIndex]);
+        }
     }
 }

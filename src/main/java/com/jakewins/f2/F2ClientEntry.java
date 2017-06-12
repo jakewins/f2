@@ -7,6 +7,9 @@ class F2ClientEntry {
     /** Owner of this entry */
     F2Client owner;
 
+    /** The lock this entry is holding or waiting for, if any */
+    F2Lock lock;
+
     /** The mode this entry holds or wants to hold a lock by (eg. shared/exclusive) */
     LockMode lockMode;
 
@@ -25,11 +28,9 @@ class F2ClientEntry {
 
     @Override
     public String toString() {
-        return "F2ClientEntry{" +
-                "owner=" + owner +
-                ", lockMode=" + lockMode +
-                ", resourceType=" + resourceType +
-                ", resourceId=" + resourceId +
-                '}';
+        return "Entry(" +
+                "Client(" + owner + "), "
+                + lockMode + " " + lock +
+                ")";
     }
 }

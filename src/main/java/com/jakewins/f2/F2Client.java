@@ -10,12 +10,22 @@ import java.util.concurrent.TimeUnit;
 class F2Client implements Locks.Client {
     private static final int CHECK_DEADLOCK_AFTER_MS = 1000;
 
-    private final F2Partitions partitions;
-
+    /** Signal when client is granted a lock it is waiting on */
     Semaphore latch = new Semaphore(0);
+    /** Lock entry this client is currently waiting on, or null */
+    F2ClientEntry waitsFor;
 
-    F2Client(F2Partitions partitions) {
+    private String name;
+    private final F2Partitions partitions;
+    private final DeadlockDetector deadlockDetector;
+
+    F2Client(F2Partitions partitions, DeadlockDetector deadlockDetector) {
         this.partitions = partitions;
+        this.deadlockDetector = deadlockDetector;
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 
     public void acquireShared(ResourceType resourceType, long resourceId) throws AcquireLockTimeoutException {
@@ -67,23 +77,23 @@ class F2Client implements Locks.Client {
         throw new UnsupportedOperationException("Sorry.");
     }
 
+    @Override
+    public String toString() {
+        return name;
+    }
+
     private AcquireOutcome acquire(AcquireMode acquireMode, LockMode mode, ResourceType resourceType, long resourceId) {
 
         F2Partition partition = partitions.getPartition(resourceId);
-        F2Lock newLock = partition.nextFreeLock != null ? partition.nextFreeLock : new F2Lock();
-        F2ClientEntry entry = partition.newClientEntry(this, mode, resourceType, resourceId);
+        F2ClientEntry entry;
 
         F2Lock lock;
         F2Lock.AcquireOutcome outcome;
         long stamp = partition.partitionLock.writeLock();
         try {
-            lock = partition.putIfAbsent(resourceType, resourceId, newLock);
+            entry = partition.newClientEntry(this, mode, resourceType, resourceId);
 
-            // If we ended up inserting the lock we got off of the partition freelist, we need to update the freelist
-            if(lock == partition.nextFreeLock) {
-                partition.nextFreeLock = lock.nextFree;
-                lock.nextFree = null;
-            }
+            lock = partition.getOrCreate(resourceType, resourceId);
 
             outcome = lock.acquire(acquireMode, entry);
 
@@ -95,6 +105,8 @@ class F2Client implements Locks.Client {
                 partition.releaseClientEntry(entry);
                 return com.jakewins.f2.AcquireOutcome.NOT_ACQUIRED;
             }
+
+            waitsFor = entry;
         } finally {
             partition.partitionLock.unlock(stamp);
         }
@@ -106,7 +118,14 @@ class F2Client implements Locks.Client {
             // and wake us up via {@link latch}. Until then, we wait.
 
             for(;;) {
-                latch.tryAcquire(CHECK_DEADLOCK_AFTER_MS, TimeUnit.MILLISECONDS);
+                boolean gotLock = latch.tryAcquire(CHECK_DEADLOCK_AFTER_MS, TimeUnit.MILLISECONDS);
+                if(gotLock) {
+                    // Someone told us we got the lock!
+                    return AcquireOutcome.ACQUIRED;
+                } else {
+                    // We timed out; need to do deadlock detection
+                    detectDeadlock(lock);
+                }
             }
         } catch(Exception e) {
             // Current thread was interrupted while waiting on a lock, not good.
@@ -114,19 +133,39 @@ class F2Client implements Locks.Client {
             errorCleanupWhileOnWaitList(partition, entry, lock);
         }
 
-
         return null;
     }
 
-    private void release(LockMode lockMode, ResourceType resourceType, long resourceId) {
+    private void detectDeadlock(F2Lock lock) {
+        partitions.stopTheWorld();
+        try {
+            deadlockDetector.detectDeadlock(this); // TODO in medias
+        } finally {
+            partitions.resumeTheWorld();
+        }
+    }
 
+    private void release(LockMode lockMode, ResourceType resourceType, long resourceId) {
+        throw new UnsupportedOperationException("Not implemented");
     }
 
     private void errorCleanupWhileOnWaitList(F2Partition partition, F2ClientEntry entry, F2Lock lock) {
+        ResourceType resourceType = entry.resourceType;
+        long resourceId = entry.resourceId;
+
         long stamp = partition.partitionLock.writeLock();
         try {
-            lock.errorCleanup(entry);
+            F2Lock.ReleaseOutcome outcome = lock.errorCleanup(entry);
+            if(outcome == F2Lock.ReleaseOutcome.LOCK_IDLE) {
+                // If the lock ended up idle, we need to remove it from the lock table before wrapping up
+                partition.removeLock(resourceType, resourceId);
+            }
             partition.releaseClientEntry(entry);
+
+            // After removing ourselves from the wait list, we know nobody will undo our latch anymore;
+            // however, we don't know that someone didn't already, before we grabbed the partition lock.
+            // Hence, under the partition lock, bring the latch back to a known state.
+            latch.drainPermits();
         } finally {
             partition.partitionLock.unlock(stamp);
         }
