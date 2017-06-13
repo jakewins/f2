@@ -37,13 +37,13 @@ class DeadlockDescription {
 
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder("Deadlock[\n");
+        StringBuilder sb = new StringBuilder("Deadlock[");
         for(int linkIndex=0;linkIndex<chain.length;linkIndex++) {
             F2ClientEntry link = chain[linkIndex];
             sb.append(String.format("(%s)-[:WAITS_FOR]->(%s)->[:HELD_BY]->", link.owner, link.lock));
         }
         sb.append(String.format("(%s)", chain[chain.length-1].owner));
-        return sb.toString();
+        return sb.append("]").toString();
     }
 
     private static boolean assertIsValidDeadlockChain(F2ClientEntry[] chain) {

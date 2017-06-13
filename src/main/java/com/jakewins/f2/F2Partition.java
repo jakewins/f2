@@ -9,8 +9,12 @@ import java.util.concurrent.locks.StampedLock;
 class SomeFastMapImplementation {
     private final HashMap<Long, F2Lock> map = new HashMap<>();
 
-    F2Lock putIfAbsent(long resourceId, F2Lock toInsert) {
-        return map.putIfAbsent(resourceId, toInsert);
+    F2Lock getOrCreate(long resourceId, F2Lock toCreate) {
+        F2Lock current = map.putIfAbsent(resourceId, toCreate);
+        if(current == null) {
+            return toCreate;
+        }
+        return current;
     }
 
     F2Lock remove(long resourceId) {
@@ -44,10 +48,10 @@ class F2Partition {
      */
     F2Lock getOrCreate(ResourceType resourceType, long resourceId) {
         SomeFastMapImplementation map = locks[resourceType.typeId()];
-        F2Lock lock = map.putIfAbsent(resourceId, nextFreeLock != null ? nextFreeLock : new F2Lock());
+        F2Lock lock = map.getOrCreate(resourceId, nextFreeLock != null ? nextFreeLock : new F2Lock());
 
         if(lock == nextFreeLock) {
-            nextFreeLock = lock.next;
+            nextFreeLock = nextFreeLock.next;
         }
 
         lock.resourceType = resourceType;
@@ -98,8 +102,11 @@ class F2Partition {
         entry.lockMode = null;
         entry.resourceType = null;
         entry.resourceId = -1;
-        entry.sharedCount = 0;
-        entry.exclusiveCount = 0;
+
+        for(int i=0;i<entry.heldcount.length;i++) {
+            entry.heldcount[i] = 0;
+        }
+
         entry.next = nextFreeClientEntry;
         nextFreeClientEntry = entry;
     }

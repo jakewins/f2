@@ -44,7 +44,7 @@ public class DeadlockDetector_Test {
     }
 
     private F2Client newClient(String name) {
-        F2Client client = new F2Client(null, null);
+        F2Client client = new F2Client(1, null, null);
         client.setName(name);
         return client;
     }
@@ -56,7 +56,7 @@ public class DeadlockDetector_Test {
         return entry;
     }
 
-    public static ResourceType NODE = new ResourceType() {
+    static ResourceType NODE = new ResourceType() {
         @Override
         public int typeId() {
             return 0;

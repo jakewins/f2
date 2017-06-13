@@ -59,6 +59,9 @@ class F2Client implements Locks.Client {
         this.partitions = partitions;
         this.deadlockDetector = deadlockDetector;
         this.heldLocks = new HashMap[numResourceTypes];
+        for(int i=0;i<numResourceTypes;i++) {
+            this.heldLocks[i] = new HashMap<>();
+        }
     }
 
     void setName(String name) {
