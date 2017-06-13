@@ -1,8 +1,9 @@
 package com.jakewins.f2;
 
-import com.jakewins.f2.include.ResourceType;
-import com.jakewins.f2.include.WaitStrategy;
 import org.junit.Test;
+import org.neo4j.kernel.impl.util.concurrent.LockWaitStrategies;
+import org.neo4j.storageengine.api.lock.ResourceType;
+import org.neo4j.storageengine.api.lock.WaitStrategy;
 
 import static com.jakewins.f2.AcquireMode.BLOCKING;
 import static com.jakewins.f2.LockMode.EXCLUSIVE;
@@ -64,7 +65,7 @@ public class DeadlockDetector_Test {
 
         @Override
         public WaitStrategy waitStrategy() {
-            return null;
+            return LockWaitStrategies.INCREMENTAL_BACKOFF;
         }
 
         @Override

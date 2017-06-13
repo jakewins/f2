@@ -1,7 +1,7 @@
 package com.jakewins.f2;
 
-import com.jakewins.f2.include.Locks;
-import com.jakewins.f2.include.ResourceType;
+import org.neo4j.kernel.impl.locking.Locks;
+import org.neo4j.storageengine.api.lock.ResourceType;
 
 enum LockMode {
     EXCLUSIVE(0),
@@ -36,6 +36,11 @@ public class F2Locks implements Locks {
 
     public Client newClient() {
         return new F2Client(resourceTypes.length, partitions, deadlockDetector);
+    }
+
+    @Override
+    public void accept(Visitor visitor) {
+        throw new UnsupportedOperationException();
     }
 
     public void close() {

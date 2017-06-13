@@ -1,7 +1,7 @@
 package com.jakewins.f2;
 
 
-import com.jakewins.f2.include.ResourceType;
+import org.neo4j.storageengine.api.lock.ResourceType;
 
 import static com.jakewins.f2.F2Lock.AcquireOutcome.ACQUIRED;
 import static com.jakewins.f2.F2Lock.AcquireOutcome.MUST_WAIT;

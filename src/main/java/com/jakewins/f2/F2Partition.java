@@ -1,6 +1,6 @@
 package com.jakewins.f2;
 
-import com.jakewins.f2.include.ResourceType;
+import org.neo4j.storageengine.api.lock.ResourceType;
 
 import java.util.HashMap;
 import java.util.concurrent.locks.StampedLock;

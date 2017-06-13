@@ -1,13 +1,17 @@
 package com.jakewins.f2;
 
 import com.jakewins.f2.F2Lock.AcquireOutcome;
-import com.jakewins.f2.include.AcquireLockTimeoutException;
-import com.jakewins.f2.include.Locks;
-import com.jakewins.f2.include.ResourceType;
 
 import java.util.HashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
+
+import org.neo4j.kernel.impl.locking.ActiveLock;
+import org.neo4j.kernel.impl.locking.LockTracer;
+import org.neo4j.kernel.impl.locking.Locks;
+import org.neo4j.storageengine.api.lock.AcquireLockTimeoutException;
+import org.neo4j.storageengine.api.lock.ResourceType;
 
 class ClientAcquireOutcome {
     final static ClientAcquireOutcome ACQUIRED = new ClientAcquireOutcome();
@@ -68,14 +72,20 @@ class F2Client implements Locks.Client {
         this.name = name;
     }
 
-    public void acquireShared(ResourceType resourceType, long resourceId) throws AcquireLockTimeoutException {
-        ClientAcquireOutcome outcome = acquire(AcquireMode.BLOCKING, LockMode.SHARED, resourceType, resourceId);
-        handleAcquireOutcome(outcome);
+    @Override
+    public void acquireShared(LockTracer lockTracer, ResourceType resourceType, long... resourceIds) throws AcquireLockTimeoutException {
+        for(long resourceId : resourceIds) {
+            ClientAcquireOutcome outcome = acquire(AcquireMode.BLOCKING, LockMode.SHARED, resourceType, resourceId);
+            handleAcquireOutcome(outcome);
+        }
     }
 
-    public void acquireExclusive(ResourceType resourceType, long resourceId) throws AcquireLockTimeoutException {
-        ClientAcquireOutcome outcome = acquire(AcquireMode.BLOCKING, LockMode.EXCLUSIVE, resourceType, resourceId);
-        handleAcquireOutcome(outcome);
+    @Override
+    public void acquireExclusive(LockTracer lockTracer, ResourceType resourceType, long... resourceIds) throws AcquireLockTimeoutException {
+        for(long resourceId : resourceIds) {
+            ClientAcquireOutcome outcome = acquire(AcquireMode.BLOCKING, LockMode.EXCLUSIVE, resourceType, resourceId);
+            handleAcquireOutcome(outcome);
+        }
     }
 
     private void handleAcquireOutcome(ClientAcquireOutcome outcome) {
@@ -90,26 +100,32 @@ class F2Client implements Locks.Client {
         }
     }
 
+    @Override
     public void releaseShared(ResourceType resourceType, long resourceId) {
         release(LockMode.SHARED, resourceType, resourceId);
     }
 
+    @Override
     public void releaseExclusive(ResourceType resourceType, long resourceId) {
         release(LockMode.EXCLUSIVE, resourceType, resourceId);
     }
 
+    @Override
     public boolean trySharedLock(ResourceType resourceType, long resourceId) {
         return acquire(AcquireMode.NONBLOCKING, LockMode.SHARED, resourceType, resourceId) == ClientAcquireOutcome.ACQUIRED;
     }
 
+    @Override
     public boolean tryExclusiveLock(ResourceType resourceType, long resourceId) {
         return acquire(AcquireMode.NONBLOCKING, LockMode.EXCLUSIVE, resourceType, resourceId) == ClientAcquireOutcome.ACQUIRED;
     }
 
+    @Override
     public boolean reEnterShared(ResourceType resourceType, long resourceId) {
         throw new UnsupportedOperationException("Sorry.");
     }
 
+    @Override
     public boolean reEnterExclusive(ResourceType resourceType, long resourceId) {
         throw new UnsupportedOperationException("Sorry.");
     }
@@ -125,6 +141,11 @@ class F2Client implements Locks.Client {
 
     public int getLockSessionId() {
         throw new UnsupportedOperationException("Sorry.");
+    }
+
+    @Override
+    public Stream<? extends ActiveLock> activeLocks() {
+        return null;
     }
 
     public long activeLockCount() {

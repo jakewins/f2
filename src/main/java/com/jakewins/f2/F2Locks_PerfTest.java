@@ -1,14 +1,18 @@
 package com.jakewins.f2;
 
-import com.jakewins.f2.include.AcquireLockTimeoutException;
-import com.jakewins.f2.include.Locks;
-import com.jakewins.f2.include.ResourceType;
+import org.neo4j.kernel.configuration.Config;
+import org.neo4j.kernel.impl.enterprise.lock.forseti.ForsetiLockManager;
+import org.neo4j.kernel.impl.locking.LockTracer;
+import org.neo4j.kernel.impl.locking.Locks;
+import org.neo4j.storageengine.api.lock.AcquireLockTimeoutException;
+import org.neo4j.storageengine.api.lock.ResourceType;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
+import java.time.Clock;
 import java.util.concurrent.TimeUnit;
 
 import static com.jakewins.f2.DeadlockDetector_Test.NODE;
@@ -19,28 +23,38 @@ public class F2Locks_PerfTest {
 
     @State(Scope.Benchmark)
     public static class SharedState {
-        private Locks locks;
+        private Locks forseti;
+        private Locks f2;
 
         @Setup
         public void setup() {
-            this.locks = new F2Locks(new ResourceType[]{NODE}, 64);
+            this.forseti = new ForsetiLockManager(Config.defaults(), Clock.systemUTC(), NODE);
+            this.f2 = new F2Locks(new ResourceType[]{NODE}, 64);
         }
     }
 
     @State(Scope.Thread)
     public static class LocalState {
-        private Locks.Client client;
+        private Locks.Client forsetiClient;
+        private Locks.Client f2Client;
 
         @Setup
         public void setup(SharedState shared) {
-            this.client = shared.locks.newClient();
+            this.forsetiClient = shared.forseti.newClient();
+            this.f2Client = shared.f2.newClient();
         }
     }
 
     @Benchmark
-    public void testAcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
-        state.client.acquireShared(NODE, 0);
-        state.client.releaseShared(NODE, 0);
+    public void f2AcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
+        state.f2Client.acquireShared(LockTracer.NONE, NODE, 0);
+        state.f2Client.releaseShared(NODE, 0);
+    }
+
+    @Benchmark
+    public void forsetiAcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
+        state.forsetiClient.acquireShared(LockTracer.NONE, NODE, 0);
+        state.forsetiClient.releaseShared(NODE, 0);
     }
 //
 //    @Benchmark

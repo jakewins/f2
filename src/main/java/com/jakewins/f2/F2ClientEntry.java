@@ -1,6 +1,6 @@
 package com.jakewins.f2;
 
-import com.jakewins.f2.include.ResourceType;
+import org.neo4j.storageengine.api.lock.ResourceType;
 
 /** Tracks one client's holding, or attempt of holding, of one lock */
 class F2ClientEntry {
