@@ -12,8 +12,8 @@ class DeadlockDescription {
     }
 
     /**
-     * @param chain describes the deadlock chain by client entries; alternating between an entry waiting,
-     *              then an entry holding that lock, and then back to an entry from the holding client waiting..
+     * @param chain describes the deadlock chain by client entries; the first entry would be the one our client is
+     *              waiting for; all entries after that a chain of held entries
      */
     DeadlockDescription(F2ClientEntry ... chain) {
         assertIsValidDeadlockChain(chain);

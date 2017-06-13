@@ -3,7 +3,6 @@ package com.jakewins.f2;
 import com.jakewins.f2.include.AcquireLockTimeoutException;
 import com.jakewins.f2.include.Locks;
 import com.jakewins.f2.include.ResourceType;
-import com.sun.org.apache.bcel.internal.generic.F2L;
 
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -17,6 +16,7 @@ class F2Client implements Locks.Client {
     F2ClientEntry waitsFor;
 
     private String name;
+
     private final F2Partitions partitions;
     private final DeadlockDetector deadlockDetector;
 
@@ -25,16 +25,30 @@ class F2Client implements Locks.Client {
         this.deadlockDetector = deadlockDetector;
     }
 
-    public void setName(String name) {
+    void setName(String name) {
         this.name = name;
     }
 
     public void acquireShared(ResourceType resourceType, long resourceId) throws AcquireLockTimeoutException {
-        acquire(AcquireMode.BLOCKING, LockMode.SHARED, resourceType, resourceId);
+        AcquireOutcome outcome = acquire(AcquireMode.BLOCKING, LockMode.SHARED, resourceType, resourceId);
+        handleAcquireOutcome(outcome);
     }
 
     public void acquireExclusive(ResourceType resourceType, long resourceId) throws AcquireLockTimeoutException {
-        acquire(AcquireMode.BLOCKING, LockMode.EXCLUSIVE, resourceType, resourceId);
+        AcquireOutcome outcome = acquire(AcquireMode.BLOCKING, LockMode.EXCLUSIVE, resourceType, resourceId);
+        handleAcquireOutcome(outcome);
+    }
+
+    private void handleAcquireOutcome(AcquireOutcome outcome) {
+        if(outcome == AcquireOutcome.ACQUIRED || outcome == AcquireOutcome.NOT_ACQUIRED) {
+            return;
+        }
+        if(outcome instanceof Deadlock) {
+            throw new RuntimeException(((Deadlock) outcome).deadlockDescription());
+        }
+        if(outcome instanceof AcquireError) {
+            throw ((AcquireError) outcome).asRuntimeException();
+        }
     }
 
     public void releaseShared(ResourceType resourceType, long resourceId) {
@@ -84,7 +98,6 @@ class F2Client implements Locks.Client {
     }
 
     private AcquireOutcome acquire(AcquireMode acquireMode, LockMode mode, ResourceType resourceType, long resourceId) {
-
         F2Partition partition = partitions.getPartition(resourceId);
         F2ClientEntry entry;
 
@@ -125,44 +138,50 @@ class F2Client implements Locks.Client {
                     return AcquireOutcome.ACQUIRED;
                 } else {
                     // We timed out; need to do deadlock detection
-                    detectDeadlock();
+                    Deadlock deadlock = detectDeadlock();
+                    if(deadlock != null) {
+                        return deadlock;
+                    }
                 }
             }
         } catch(Exception e) {
             // Current thread was interrupted while waiting on a lock, not good.
             // We are on the wait list for the lock, so we can't simply leave, need cleanup.
-            errorCleanupWhileOnWaitList(partition, entry);
+            cleanUpErrorWhileWaiting(partition, entry);
+            return new AcquireError(e);
         }
-
-        return null;
     }
 
     private void release(LockMode lockMode, ResourceType resourceType, long resourceId) {
         throw new UnsupportedOperationException("Not implemented");
     }
 
-    private void errorCleanupWhileOnWaitList(F2Partition partition, F2ClientEntry entry) {
+    private void cleanUpErrorWhileWaiting(F2Partition partition, F2ClientEntry entry) {
         long stamp = partition.partitionLock.writeLock();
         try {
-            cleanUpErrorWhileWaiting_locked(partition, entry);
+            cleanUpErrorWhileWaiting_lockHeld(partition, entry);
         } finally {
             partition.partitionLock.unlock(stamp);
         }
     }
 
-    private void detectDeadlock() {
+    private Deadlock detectDeadlock() {
         partitions.stopTheWorld();
         try {
-            DeadlockDescription deadlock = deadlockDetector.detectDeadlock(this);
-            if(deadlock == DeadlockDetector.NONE) {
-                return;
+            DeadlockDescription description = deadlockDetector.detectDeadlock(this);
+            if(description == DeadlockDetector.NONE) {
+                return null;
             }
+
+            Deadlock deadlock = new Deadlock(description.toString());
 
             // TODO: We could easily tell any waiter in the deadlock chain to abort by signalling;
             //       eg. we could abort a client with lower prio than us, or whatever.
             // For now, abort the client that firsts discovers the deadlock
             F2Partition partition = partitions.getPartition(waitsFor.resourceId);
-            cleanUpErrorWhileWaiting_locked(partition, waitsFor);
+            cleanUpErrorWhileWaiting_lockHeld(partition, waitsFor);
+
+            return deadlock;
         } finally {
             partitions.resumeTheWorld();
         }
@@ -171,7 +190,7 @@ class F2Client implements Locks.Client {
     /**
      * NOTE: Must hold at least partition lock
      */
-    private void cleanUpErrorWhileWaiting_locked(F2Partition partition, F2ClientEntry entry) {
+    private void cleanUpErrorWhileWaiting_lockHeld(F2Partition partition, F2ClientEntry entry) {
         ResourceType resourceType = entry.resourceType;
         long resourceId = entry.resourceId;
 

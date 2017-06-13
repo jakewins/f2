@@ -30,8 +30,7 @@ public class DeadlockDetector_Test {
         clientX.waitsFor = clientXWaitsForLockB;
 
         DeadlockDescription expectedDeadlock = new DeadlockDescription(
-                clientXWaitsForLockB, clientYWaitsForLockA, clientXWaitsForLockB
-        );
+                clientXWaitsForLockB, clientYWaitsForLockA, clientXWaitsForLockB );
         DeadlockDescription deadlock = new DeadlockDetector().detectDeadlock(clientX);
 
         assert deadlock.equals(expectedDeadlock) : String.format("Expected %s, found %s", expectedDeadlock, deadlock);

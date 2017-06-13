@@ -10,7 +10,7 @@ Good place to start reading is in [F2Client#acquire](src/main/java/com/jakewins/
 The design is inspired by the lock manager in postgres; the locks are grouped into partitions, and each partition
 is guarded by a stamped lock.
 
-In the best case, acquiring an open shared lock roughly consists of:
+Acquiring a shared lock roughly consists of:
 
     # Entry to represent our relationship to the lock (held exclusively, held shared, on waitlist)
     lockEntry = newLockEntry()
