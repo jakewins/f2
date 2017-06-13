@@ -94,9 +94,12 @@ class F2Partition {
      */
     void releaseClientEntry(F2ClientEntry entry) {
         entry.owner = null;
+        entry.lock = null;
         entry.lockMode = null;
         entry.resourceType = null;
         entry.resourceId = -1;
+        entry.sharedCount = 0;
+        entry.exclusiveCount = 0;
         entry.next = nextFreeClientEntry;
         nextFreeClientEntry = entry;
     }

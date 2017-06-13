@@ -24,7 +24,13 @@ class F2ClientEntry {
      * If the lock is waited on: The next entry waiting for the same lock
      * If the entry is on a freelist: The next free entry after this one
      */
-    F2ClientEntry next = null;
+    F2ClientEntry next;
+
+    /**
+     * Used by {@link #owner} without synchronization; count number of re-entrant locks held to avoid globally
+     * coordinating when grabbing locks already held.
+     */
+    int[] heldcount = new int[LockMode.numberOfModes()];
 
     @Override
     public String toString() {
@@ -32,5 +38,14 @@ class F2ClientEntry {
                 "Client(" + owner + "), "
                 + lockMode + " " + lock +
                 ")";
+    }
+
+    boolean holdsLocks() {
+        for(int held : heldcount) {
+            if(held > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 }
