@@ -3,10 +3,10 @@ package com.jakewins.f2;
 import com.jakewins.f2.F2Lock.AcquireOutcome;
 
 import java.util.HashMap;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import com.jakewins.f2.infrastructure.Latch;
 import org.neo4j.kernel.impl.locking.ActiveLock;
 import org.neo4j.kernel.impl.locking.LockTracer;
 import org.neo4j.kernel.impl.locking.Locks;
@@ -49,7 +49,7 @@ class F2Client implements Locks.Client {
     private static final int CHECK_DEADLOCK_AFTER_MS = 1000;
 
     /** Signal when client is granted a lock it is waiting on */
-    Semaphore latch = new Semaphore(0);
+    Latch latch = new Latch();
 
     /**
      * Lock entry this client is currently waiting on, or null; this is set by the lock when we're added to
