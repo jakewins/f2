@@ -1,5 +1,6 @@
 package com.jakewins.f2;
 
+import org.neo4j.kernel.DeadlockDetectedException;
 import org.neo4j.kernel.configuration.Config;
 import org.neo4j.kernel.impl.enterprise.lock.forseti.ForsetiLockManager;
 import org.neo4j.kernel.impl.locking.LockTracer;
@@ -45,22 +46,37 @@ public class F2Locks_PerfTest {
         }
     }
 
-//    @Benchmark
-//    public void f2AcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
-//        state.f2Client.acquireShared(LockTracer.NONE, NODE, 0);
-//        state.f2Client.releaseShared(NODE, 0);
-//    }
-//
-//    @Benchmark
-//    public void forsetiAcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
-//        state.forsetiClient.acquireShared(LockTracer.NONE, NODE, 0);
-//        state.forsetiClient.releaseShared(NODE, 0);
-//    }
+    @Benchmark
+    public void f2AcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
+        state.f2Client.acquireShared(LockTracer.NONE, NODE, 0);
+        state.f2Client.releaseShared(NODE, 0);
+    }
 
     @Benchmark
-    public void testAcquireContendedExclusive(LocalState state) throws AcquireLockTimeoutException {
+    public void forsetiAcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
+        state.forsetiClient.acquireShared(LockTracer.NONE, NODE, 0);
+        state.forsetiClient.releaseShared(NODE, 0);
+    }
+
+    @Benchmark
+    public void f2AcquireContendedExclusive(LocalState state) throws AcquireLockTimeoutException {
         state.f2Client.acquireExclusive(LockTracer.NONE, NODE, 0);
-        state.f2Client.acquireExclusive(LockTracer.NONE, NODE, 0);
+        state.f2Client.releaseExclusive(NODE, 0);
+    }
+
+    @Benchmark
+    public void forsetiAcquireContendedExclusive(LocalState state) throws AcquireLockTimeoutException {
+        for(;;) {
+            try {
+                state.forsetiClient.acquireExclusive(LockTracer.NONE, NODE, 0);
+                state.forsetiClient.releaseExclusive(NODE, 0);
+                return;
+            } catch (DeadlockDetectedException e) {
+                // This use case can't deadlock, but Forseti finds false positives.
+                // Correct for this by forcing Forseti to keep going until it actually acquires and releases the
+                // lock once.
+            }
+        }
     }
 
     public static void main(String[] args) throws RunnerException {

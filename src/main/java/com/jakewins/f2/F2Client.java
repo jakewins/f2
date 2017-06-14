@@ -50,7 +50,13 @@ class F2Client implements Locks.Client {
 
     /** Signal when client is granted a lock it is waiting on */
     Semaphore latch = new Semaphore(0);
-    /** Lock entry this client is currently waiting on, or null */
+
+    /**
+     * Lock entry this client is currently waiting on, or null; this is set by the lock when we're added to
+     * wait list, cleared when someone grants us the lock.
+     *
+     * NOTE: Must hold partition lock of the entry to write to this
+     */
     F2ClientEntry waitsFor;
 
     private String name;
@@ -159,6 +165,7 @@ class F2Client implements Locks.Client {
 
     private ClientAcquireOutcome acquire(AcquireMode acquireMode, LockMode lockMode, ResourceType resourceType, long resourceId) {
         // If we already hold this lock, no need to globally synchronize
+        // TODO there is some sort of bug with reentrancy
         F2ClientEntry entry = heldLocks[resourceType.typeId()].get(resourceId);
         if(entry != null) {
             if(entry.heldcount[lockMode.index] > 0) {
@@ -166,7 +173,6 @@ class F2Client implements Locks.Client {
                 return ClientAcquireOutcome.ACQUIRED;
             }
         }
-        RuntimeException ex = null;
 
         // We don't hold this lock already, go to work on the relevant partition
         F2Partition partition = partitions.getPartition(resourceId);
@@ -198,10 +204,10 @@ class F2Client implements Locks.Client {
 
         try {
             assert outcome == AcquireOutcome.MUST_WAIT;
+
             // At this point, we are on the wait list for the lock we want, and we *have* to wait for it.
             // The way this works is that, eventually, someone ahead of us on the wait list will grant us the lock
-            // and wake us up via {@link latch}. Until then, we wait.
-
+            // and wake us up via {@link latch}. Until then, we wait; if it takes to long we wake up and check deadlock.
             for(;;) {
                 boolean latchTripped = latch.tryAcquire(CHECK_DEADLOCK_AFTER_MS, TimeUnit.MILLISECONDS);
                 if(latchTripped) {
@@ -294,7 +300,6 @@ class F2Client implements Locks.Client {
      * NOTE: Must hold at least partition lock
      */
     private void cleanUpErrorWhileWaiting_lockHeld(F2Partition partition, F2ClientEntry entry) {
-        waitsFor = null;
         ResourceType resourceType = entry.resourceType;
         long resourceId = entry.resourceId;
 
@@ -304,11 +309,6 @@ class F2Client implements Locks.Client {
             partition.removeLock(resourceType, resourceId);
         }
         releaseEntryIfUnused(partition, entry);
-
-        // After removing ourselves from the wait list, we know nobody will undo our latch anymore;
-        // however, we don't know that someone didn't already, before we grabbed the partition lock.
-        // Hence, under the partition lock, bring the latch back to a known state.
-        latch.drainPermits();
     }
 
     /**

@@ -231,17 +231,20 @@ class F2Lock {
     }
 
     private void removeFromWaitList(F2ClientEntry entry) {
-        if(waitList == entry) {
-            waitList = entry.next;
-            return;
-        }
-
-        F2ClientEntry current;
-        for(current = waitList; current.next != null; ) {
-            if(current.next == entry) {
-                current.next = entry.next;
+        F2ClientEntry prev = null;
+        for(F2ClientEntry current = waitList; current != null; ) {
+            if(current == entry) {
+                // Found our entry; remove it from wait list
+                if(prev == null) {
+                    waitList = entry.next;
+                } else {
+                    prev.next = entry.next;
+                }
+                entry.owner.waitsFor = null;
+                entry.owner.latch.release();
                 return;
             }
+            prev = current;
             current = current.next;
         }
 
