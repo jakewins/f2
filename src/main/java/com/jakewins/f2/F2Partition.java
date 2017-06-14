@@ -1,26 +1,11 @@
 package com.jakewins.f2;
 
+import org.neo4j.collection.primitive.Primitive;
+import org.neo4j.collection.primitive.PrimitiveLongObjectMap;
 import org.neo4j.storageengine.api.lock.ResourceType;
 
 import java.util.HashMap;
 import java.util.concurrent.locks.StampedLock;
-
-// Intended to be replaced by something spiffy
-class SomeFastMapImplementation {
-    private final HashMap<Long, F2Lock> map = new HashMap<>();
-
-    F2Lock getOrCreate(long resourceId, F2Lock toCreate) {
-        F2Lock current = map.putIfAbsent(resourceId, toCreate);
-        if(current == null) {
-            return toCreate;
-        }
-        return current;
-    }
-
-    F2Lock remove(long resourceId) {
-        return map.remove(resourceId);
-    }
-}
 
 /**
  * F2 locks are split into partitions; operations within a partition must be guarded by the partition lock.
@@ -32,14 +17,14 @@ class F2Partition {
     private F2Lock nextFreeLock = null;
     private F2ClientEntry nextFreeClientEntry = null;
 
-    private final SomeFastMapImplementation[] locks;
+    private final PrimitiveLongObjectMap<F2Lock>[] locks;
 
     F2Partition(int numResourceTypes) {
         assert Long.bitCount(numResourceTypes) == 1 : "numResourceTypes must be power of two.";
 
-        this.locks = new SomeFastMapImplementation[numResourceTypes];
+        this.locks = new PrimitiveLongObjectMap[numResourceTypes];
         for(int resourceType=0;resourceType<numResourceTypes;resourceType++) {
-            this.locks[resourceType] = new SomeFastMapImplementation();
+            this.locks[resourceType] = Primitive.longObjectMap(128);
         }
     }
 
@@ -47,15 +32,21 @@ class F2Partition {
      * NOTE: Must hold {@link #partitionLock}
      */
     F2Lock getOrCreate(ResourceType resourceType, long resourceId) {
-        SomeFastMapImplementation map = locks[resourceType.typeId()];
-        F2Lock lock = map.getOrCreate(resourceId, nextFreeLock != null ? nextFreeLock : new F2Lock());
-
-        if(lock == nextFreeLock) {
-            nextFreeLock = nextFreeLock.next;
+        PrimitiveLongObjectMap<F2Lock> map = locks[resourceType.typeId()];
+        F2Lock lock = map.get(resourceId);
+        if(lock == null) {
+            if(nextFreeLock != null) {
+                lock = nextFreeLock;
+                nextFreeLock = nextFreeLock.next;
+            } else {
+                lock = new F2Lock();
+            }
+            map.put(resourceId, lock);
         }
 
         lock.resourceType = resourceType;
         lock.resourceId = resourceId;
+        lock.next = null;
 
         return lock;
     }
@@ -66,7 +57,7 @@ class F2Partition {
      * NOTE: Must hold {@link #partitionLock}
      */
     void removeLock(ResourceType resourceType, long resourceId) {
-        SomeFastMapImplementation map = locks[resourceType.typeId()];
+        PrimitiveLongObjectMap<F2Lock> map = locks[resourceType.typeId()];
         F2Lock lock = map.remove(resourceId);
 
         assert lock.sharedHolderList == null : String.format("Removed lock with shared holders: %s ", lock.sharedHolderList);

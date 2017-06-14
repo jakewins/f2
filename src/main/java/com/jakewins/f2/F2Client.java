@@ -7,6 +7,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import com.jakewins.f2.infrastructure.Latch;
+import org.neo4j.collection.primitive.Primitive;
+import org.neo4j.collection.primitive.PrimitiveLongObjectMap;
 import org.neo4j.kernel.impl.locking.ActiveLock;
 import org.neo4j.kernel.impl.locking.LockTracer;
 import org.neo4j.kernel.impl.locking.Locks;
@@ -63,14 +65,14 @@ class F2Client implements Locks.Client {
 
     private final F2Partitions partitions;
     private final DeadlockDetector deadlockDetector;
-    private final HashMap<Long, F2ClientEntry>[] heldLocks;
+    private final PrimitiveLongObjectMap<F2ClientEntry>[] heldLocks;
 
     F2Client(int numResourceTypes, F2Partitions partitions, DeadlockDetector deadlockDetector) {
         this.partitions = partitions;
         this.deadlockDetector = deadlockDetector;
-        this.heldLocks = new HashMap[numResourceTypes];
+        this.heldLocks = new PrimitiveLongObjectMap[numResourceTypes];
         for(int i=0;i<numResourceTypes;i++) {
-            this.heldLocks[i] = new HashMap<>();
+            this.heldLocks[i] = Primitive.longObjectMap(32);
         }
     }
 
