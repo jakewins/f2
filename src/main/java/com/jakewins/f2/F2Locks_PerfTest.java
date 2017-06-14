@@ -45,23 +45,23 @@ public class F2Locks_PerfTest {
         }
     }
 
-    @Benchmark
-    public void f2AcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
-        state.f2Client.acquireShared(LockTracer.NONE, NODE, 0);
-        state.f2Client.releaseShared(NODE, 0);
-    }
-
-    @Benchmark
-    public void forsetiAcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
-        state.forsetiClient.acquireShared(LockTracer.NONE, NODE, 0);
-        state.forsetiClient.releaseShared(NODE, 0);
-    }
+//    @Benchmark
+//    public void f2AcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
+//        state.f2Client.acquireShared(LockTracer.NONE, NODE, 0);
+//        state.f2Client.releaseShared(NODE, 0);
+//    }
 //
 //    @Benchmark
-//    public void testAcquireContendedExclusive(LocalState state) throws AcquireLockTimeoutException {
-//        state.client.acquireExclusive(NODE, 0);
-//        state.client.acquireExclusive(NODE, 0);
+//    public void forsetiAcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
+//        state.forsetiClient.acquireShared(LockTracer.NONE, NODE, 0);
+//        state.forsetiClient.releaseShared(NODE, 0);
 //    }
+
+    @Benchmark
+    public void testAcquireContendedExclusive(LocalState state) throws AcquireLockTimeoutException {
+        state.f2Client.acquireExclusive(LockTracer.NONE, NODE, 0);
+        state.f2Client.acquireExclusive(LockTracer.NONE, NODE, 0);
+    }
 
     public static void main(String[] args) throws RunnerException {
         Options opt = new OptionsBuilder()

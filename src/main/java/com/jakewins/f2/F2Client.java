@@ -166,6 +166,7 @@ class F2Client implements Locks.Client {
                 return ClientAcquireOutcome.ACQUIRED;
             }
         }
+        RuntimeException ex = null;
 
         // We don't hold this lock already, go to work on the relevant partition
         F2Partition partition = partitions.getPartition(resourceId);
@@ -184,10 +185,6 @@ class F2Client implements Locks.Client {
             if(outcome == AcquireOutcome.NOT_ACQUIRED) {
                 releaseEntryIfUnused(partition, entry);
                 return ClientAcquireOutcome.NOT_ACQUIRED;
-            }
-
-            if(outcome == AcquireOutcome.MUST_WAIT) {
-                waitsFor = entry;
             }
         } finally {
             partition.partitionLock.unlock(stamp);
@@ -240,8 +237,8 @@ class F2Client implements Locks.Client {
             return;
         }
 
-        // If we end up here, we've reached 0 re-entrant holds, so we need to release the actual lock from the lock table
-        // We don't hold this lock already, go to work on the relevant partition
+        // If we end up here, we've brought our counter of lock re-entrancy to zero, meaning it's time to release the
+        // actual lock; hence we lock the relevant partition and go to work.
         F2Partition partition = partitions.getPartition(resourceId);
         F2Lock lock = entry.lock;
         long stamp = partition.partitionLock.writeLock();

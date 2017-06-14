@@ -35,7 +35,7 @@ class F2ClientEntry {
     @Override
     public String toString() {
         return "Entry(" +
-                "Client(" + owner + "), "
+                "Client(" + owner + ") "
                 + lockMode + " " + lock +
                 ")";
     }

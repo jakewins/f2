@@ -136,6 +136,7 @@ class F2Lock {
         if(mode == AcquireMode.BLOCKING) {
             entry.next = null;
             entry.lock = this;
+            entry.owner.waitsFor = entry;
 
             if(waitList == null) {
                 waitList = entry;
@@ -208,6 +209,7 @@ class F2Lock {
                 exclusiveHolder = nextWaiter;
 
                 // Signal the waiting client
+                nextWaiter.owner.waitsFor = null;
                 nextWaiter.owner.latch.release();
                 return LOCK_HELD;
             } else {
@@ -222,6 +224,7 @@ class F2Lock {
                 sharedHolderList = nextWaiter;
 
                 // Signal the waiting client
+                nextWaiter.owner.waitsFor = null;
                 nextWaiter.owner.latch.release();
             }
         }

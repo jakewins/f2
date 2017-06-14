@@ -16,7 +16,7 @@ class DeadlockDescription {
      *              waiting for; all entries after that a chain of held entries
      */
     DeadlockDescription(F2ClientEntry ... chain) {
-        assertIsValidDeadlockChain(chain);
+        assert assertIsValidDeadlockChain(chain);
         this.chain = chain;
     }
 
@@ -166,6 +166,12 @@ class DeadlockDetector {
                 return true;
             }
 
+            if(lock.exclusiveHolder.owner == null) {
+                throw new RuntimeException("Waitsfor record with owner == null: " + lock.exclusiveHolder);
+            }
+            if(lock.exclusiveHolder.owner == blockee) {
+                throw new RuntimeException("Uhhh " + lock.exclusiveHolder);
+            }
             if (detectRecursively(source, lock.exclusiveHolder.owner, detectedDeadlockChain)){
                 // Found a loop
                 detectedDeadlockChain.push(lock.exclusiveHolder.owner.waitsFor);
