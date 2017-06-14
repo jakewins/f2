@@ -31,7 +31,7 @@ class F2Partition {
     /**
      * NOTE: Must hold {@link #partitionLock}
      */
-    F2Lock getOrCreate(ResourceType resourceType, long resourceId) {
+    F2Lock getOrCreateLock(ResourceType resourceType, long resourceId) {
         PrimitiveLongObjectMap<F2Lock> map = locks[resourceType.typeId()];
         F2Lock lock = map.get(resourceId);
         if(lock == null) {

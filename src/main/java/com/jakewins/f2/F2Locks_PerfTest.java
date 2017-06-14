@@ -8,8 +8,6 @@ import org.neo4j.kernel.impl.locking.Locks;
 import org.neo4j.storageengine.api.lock.AcquireLockTimeoutException;
 import org.neo4j.storageengine.api.lock.ResourceType;
 import org.openjdk.jmh.annotations.*;
-import org.openjdk.jmh.profile.HotspotCompilationProfiler;
-import org.openjdk.jmh.profile.StackProfiler;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
@@ -48,13 +46,13 @@ public class F2Locks_PerfTest {
         }
     }
 
-//    @Benchmark
+    @Benchmark
     public void f2AcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
         state.f2Client.acquireShared(LockTracer.NONE, NODE, 0);
         state.f2Client.releaseShared(NODE, 0);
     }
 
-//    @Benchmark
+    @Benchmark
     public void forsetiAcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
         state.forsetiClient.acquireShared(LockTracer.NONE, NODE, 0);
         state.forsetiClient.releaseShared(NODE, 0);

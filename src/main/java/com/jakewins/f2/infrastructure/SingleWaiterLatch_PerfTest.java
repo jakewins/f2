@@ -10,19 +10,19 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 @State(Scope.Group)
-public class Latch_PerfTest {
+public class SingleWaiterLatch_PerfTest {
 
-    private Latch latchA;
-    private Latch latchB;
+    private SingleWaiterLatch latchA;
+    private SingleWaiterLatch latchB;
 
     private Semaphore semaphoreA;
     private Semaphore semaphoreB;
 
     @Setup(Level.Iteration)
     public void up() {
-        latchA = new Latch();
+        latchA = new SingleWaiterLatch();
         latchA.release();
-        latchB = new Latch();
+        latchB = new SingleWaiterLatch();
         latchB.release();
         semaphoreA = new Semaphore(1);
         semaphoreB = new Semaphore(1);
@@ -62,7 +62,7 @@ public class Latch_PerfTest {
 
     public static void main(String[] args) throws RunnerException {
         Options opt = new OptionsBuilder()
-                .include(Latch_PerfTest.class.getSimpleName())
+                .include(SingleWaiterLatch_PerfTest.class.getSimpleName())
                 .warmupIterations(1)
                 .measurementIterations(5)
                 .threads(2)

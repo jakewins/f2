@@ -2,11 +2,10 @@ package com.jakewins.f2;
 
 import com.jakewins.f2.F2Lock.AcquireOutcome;
 
-import java.util.HashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
-import com.jakewins.f2.infrastructure.Latch;
+import com.jakewins.f2.infrastructure.SingleWaiterLatch;
 import org.neo4j.collection.primitive.Primitive;
 import org.neo4j.collection.primitive.PrimitiveLongObjectMap;
 import org.neo4j.kernel.impl.locking.ActiveLock;
@@ -51,7 +50,7 @@ class F2Client implements Locks.Client {
     private static final int CHECK_DEADLOCK_AFTER_MS = 1000;
 
     /** Signal when client is granted a lock it is waiting on */
-    Latch latch = new Latch();
+    SingleWaiterLatch latch = new SingleWaiterLatch();
 
     /**
      * Lock entry this client is currently waiting on, or null; this is set by the lock when we're added to
@@ -186,7 +185,7 @@ class F2Client implements Locks.Client {
                 entry = partition.newClientEntry(this, lockMode, resourceType, resourceId);
             }
 
-            lock = partition.getOrCreate(resourceType, resourceId);
+            lock = partition.getOrCreateLock(resourceType, resourceId);
 
             outcome = lock.acquire(acquireMode, entry);
 

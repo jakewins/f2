@@ -9,7 +9,7 @@ import java.util.concurrent.locks.LockSupport;
  * {@link java.util.concurrent.Semaphore}, but because it does not maintain a wait list it can be substantially
  * faster (eg. about one order faster for ping/pong micro benchmark).
  */
-public class Latch {
+public class SingleWaiterLatch {
 
     private static final int OPEN = 0; // or less; negatives indicate additional permits to acquire
     private static final int CLOSED = 1;
