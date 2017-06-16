@@ -14,9 +14,11 @@ import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 import java.time.Clock;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import static com.jakewins.f2.DeadlockDetector_Test.NODE;
+import static com.jakewins.f2.DeadlockDetector_Test.SCHEMA;
 
 @State(Scope.Thread)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
@@ -29,52 +31,71 @@ public class F2Locks_PerfTest {
 
         @Setup
         public void setup() {
-            this.forseti = new ForsetiLockManager(Config.defaults(), Clock.systemUTC(), NODE);
-            this.f2 = new F2Locks(new ResourceType[]{NODE}, 64);
+            this.forseti = new ForsetiLockManager(Config.defaults(), Clock.systemUTC(), NODE, SCHEMA);
+            this.f2 = new F2Locks(new ResourceType[]{NODE, SCHEMA}, 64);
         }
     }
 
-    @State(Scope.Thread)
-    public static class LocalState {
-        private Locks.Client forsetiClient;
-        private Locks.Client f2Client;
+    private Locks.Client forsetiClient;
+    private Locks.Client f2Client;
+    private Random random;
 
-        @Setup
-        public void setup(SharedState shared) {
-            this.forsetiClient = shared.forseti.newClient();
-            this.f2Client = shared.f2.newClient();
-        }
+    @Setup
+    public void setup(SharedState shared) {
+        this.forsetiClient = shared.forseti.newClient();
+        this.f2Client = shared.f2.newClient();
+        this.random = new Random();
     }
 
-    @Benchmark
-    public void f2AcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
-        state.f2Client.acquireShared(LockTracer.NONE, NODE, 0);
-        state.f2Client.releaseShared(NODE, 0);
-    }
+//    @Benchmark
+//    public void f2AcquireContendedShared() throws AcquireLockTimeoutException {
+//        f2Client.acquireShared(LockTracer.NONE, NODE, 0);
+//        f2Client.releaseShared(NODE, 0);
+//    }
+//
+//    @Benchmark
+//    public void forsetiAcquireContendedShared() throws AcquireLockTimeoutException {
+//        forsetiClient.acquireShared(LockTracer.NONE, NODE, 0);
+//        forsetiClient.releaseShared(NODE, 0);
+//    }
+//
+//    @Benchmark
+//    public void f2AcquireContendedExclusive() throws AcquireLockTimeoutException {
+//        f2Client.acquireExclusive(LockTracer.NONE, NODE, 0);
+//        f2Client.releaseExclusive(NODE, 0);
+//    }
+//
+//    @Benchmark
+//    public void forsetiAcquireContendedExclusive() throws AcquireLockTimeoutException {
+//        for(;;) {
+//            try {
+//                forsetiClient.acquireExclusive(LockTracer.NONE, NODE, 0);
+//                forsetiClient.releaseExclusive(NODE, 0);
+//                return;
+//            } catch (DeadlockDetectedException e) {
+//                // This use case can't deadlock, but Forseti finds false positives.
+//                // Correct for this by forcing Forseti to keep going until it actually acquires and releases the
+//                // lock once.
+//            }
+//        }
+//    }
 
     @Benchmark
-    public void forsetiAcquireContendedShared(LocalState state) throws AcquireLockTimeoutException {
-        state.forsetiClient.acquireShared(LockTracer.NONE, NODE, 0);
-        state.forsetiClient.releaseShared(NODE, 0);
-    }
-
-    @Benchmark
-    public void f2AcquireContendedExclusive(LocalState state) throws AcquireLockTimeoutException {
-        state.f2Client.acquireExclusive(LockTracer.NONE, NODE, 0);
-        state.f2Client.releaseExclusive(NODE, 0);
-    }
-
-    @Benchmark
-    public void forsetiAcquireContendedExclusive(LocalState state) throws AcquireLockTimeoutException {
+    public void f2AcquireCombination() throws AcquireLockTimeoutException {
         for(;;) {
             try {
-                state.forsetiClient.acquireExclusive(LockTracer.NONE, NODE, 0);
-                state.forsetiClient.releaseExclusive(NODE, 0);
+                // Always acquire the schema lock
+                f2Client.acquireShared(LockTracer.NONE, SCHEMA, 0);
+
+                // Then acquire 5 random locks
+                for (int i = 0; i < 5; i++) {
+                    f2Client.acquireExclusive(LockTracer.NONE, NODE, random.nextInt(100));
+                }
                 return;
             } catch (DeadlockDetectedException e) {
-                // This use case can't deadlock, but Forseti finds false positives.
-                // Correct for this by forcing Forseti to keep going until it actually acquires and releases the
-                // lock once.
+                // Retry
+            } finally {
+                f2Client.close(); // technically not allowed to reuse after this, but current impl allows this
             }
         }
     }

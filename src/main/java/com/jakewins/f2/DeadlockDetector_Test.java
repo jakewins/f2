@@ -40,7 +40,7 @@ public class DeadlockDetector_Test {
     static ResourceType NODE = new ResourceType() {
         @Override
         public int typeId() {
-            return 0;
+            return 1;
         }
 
         @Override
@@ -51,6 +51,23 @@ public class DeadlockDetector_Test {
         @Override
         public String name() {
             return "Node";
+        }
+    };
+
+    static ResourceType SCHEMA = new ResourceType() {
+        @Override
+        public int typeId() {
+            return 0;
+        }
+
+        @Override
+        public WaitStrategy waitStrategy() {
+            return LockWaitStrategies.INCREMENTAL_BACKOFF;
+        }
+
+        @Override
+        public String name() {
+            return "Schema";
         }
     };
 }

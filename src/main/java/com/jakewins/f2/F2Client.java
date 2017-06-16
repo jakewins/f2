@@ -2,6 +2,9 @@ package com.jakewins.f2;
 
 import com.jakewins.f2.F2Lock.AcquireOutcome;
 
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -138,12 +141,47 @@ class F2Client implements Locks.Client {
     }
 
 
+    @Override
     public void stop() {
         throw new UnsupportedOperationException("Sorry.");
     }
 
+    @Override
     public void close() {
+        // TODO: Verify escape analysis puts this on the stack
+        List<F2ClientEntry>[] heldByPartition = new List[partitions.numberOfPartitions()];
 
+        // Step 1: Group locks by partition, so we can release in each partition in bulk
+        for (PrimitiveLongObjectMap<F2ClientEntry> locks : heldLocks) {
+            locks.visitEntries((resourceId, entry) -> {
+                F2Partition partition = partitions.getPartition(resourceId);
+                List<F2ClientEntry> heldInThisPartition = heldByPartition[partition.index()];
+                if(heldInThisPartition == null) {
+                    heldByPartition[partition.index()] = heldInThisPartition = new LinkedList<>();
+                }
+                heldInThisPartition.add(entry);
+                return false;
+            });
+            locks.clear();
+        }
+
+        // Step 2: Release locks in each partition in bulk
+        for(int partitionIndex=0;partitionIndex<heldByPartition.length;partitionIndex++) {
+            List<F2ClientEntry> entries = heldByPartition[partitionIndex];
+            if(entries == null) {
+                continue;
+            }
+
+            F2Partition partition = partitions.getPartitionByIndex(partitionIndex);
+            partition.lock();
+            try {
+                for (F2ClientEntry entry : entries) {
+                    release_partitionLockHeld(partition, entry);
+                }
+            } finally {
+                partition.unlock();
+            }
+        }
     }
 
     public int getLockSessionId() {
@@ -179,7 +217,7 @@ class F2Client implements Locks.Client {
         F2Partition partition = partitions.getPartition(resourceId);
         F2Lock lock;
         AcquireOutcome outcome;
-        long stamp = partition.partitionLock.writeLock();
+        partition.lock();
         try {
             if(entry == null) {
                 entry = partition.newClientEntry(this, lockMode, resourceType, resourceId);
@@ -194,7 +232,7 @@ class F2Client implements Locks.Client {
                 return ClientAcquireOutcome.NOT_ACQUIRED;
             }
         } finally {
-            partition.partitionLock.unlock(stamp);
+            partition.unlock();
         }
 
         if(outcome == AcquireOutcome.ACQUIRED) {
@@ -247,32 +285,29 @@ class F2Client implements Locks.Client {
         // If we end up here, we've brought our counter of lock re-entrancy to zero, meaning it's time to release the
         // actual lock; hence we lock the relevant partition and go to work.
         F2Partition partition = partitions.getPartition(resourceId);
-        F2Lock lock = entry.lock;
-        long stamp = partition.partitionLock.writeLock();
+        partition.lock();
         try {
-            F2Lock.ReleaseOutcome outcome = lock.release(entry);
-            releaseEntryIfUnused(partition, entry);
-
-            if(outcome == F2Lock.ReleaseOutcome.LOCK_HELD) {
-                return;
-            }
-
-            // If the lock is idle (eg. there are no holders and no waiters) then its our job to remove it
-            // from the lock table.
-            assert outcome == F2Lock.ReleaseOutcome.LOCK_IDLE : "Lock idle is only allowed state here.";
-            partition.removeLock(resourceType, resourceId);
+            release_partitionLockHeld(partition, entry);
         } finally {
-            partition.partitionLock.unlock(stamp);
+            partition.unlock();
         }
     }
 
-    private void cleanUpErrorWhileWaiting(F2Partition partition, F2ClientEntry entry) {
-        long stamp = partition.partitionLock.writeLock();
-        try {
-            cleanUpErrorWhileWaiting_lockHeld(partition, entry);
-        } finally {
-            partition.partitionLock.unlock(stamp);
+    private void release_partitionLockHeld(F2Partition partition, F2ClientEntry entry) {
+        ResourceType resourceType = entry.resourceType;
+        long resourceId = entry.resourceId;
+
+        F2Lock.ReleaseOutcome outcome = entry.lock.release(entry);
+        releaseEntryIfUnused(partition, entry);
+
+        if(outcome == F2Lock.ReleaseOutcome.LOCK_HELD) {
+            return;
         }
+
+        // If the lock is idle (eg. there are no holders and no waiters) then its our job to remove it
+        // from the lock table.
+        assert outcome == F2Lock.ReleaseOutcome.LOCK_IDLE : "Lock idle is only allowed state here.";
+        partition.removeLock(resourceType, resourceId);
     }
 
     private Deadlock detectDeadlock() {
@@ -289,7 +324,7 @@ class F2Client implements Locks.Client {
             //       eg. we could abort a client with lower prio than us, or whatever.
             // For now, abort the client that firsts discovers the deadlock
             F2Partition partition = partitions.getPartition(waitsFor.resourceId);
-            cleanUpErrorWhileWaiting_lockHeld(partition, waitsFor);
+            cleanUpErrorWhileWaiting_partitionLockHeld(partition, waitsFor);
 
             return deadlock;
         } finally {
@@ -297,10 +332,19 @@ class F2Client implements Locks.Client {
         }
     }
 
+    private void cleanUpErrorWhileWaiting(F2Partition partition, F2ClientEntry entry) {
+        long stamp = partition.partitionLock.writeLock();
+        try {
+            cleanUpErrorWhileWaiting_partitionLockHeld(partition, entry);
+        } finally {
+            partition.partitionLock.unlock(stamp);
+        }
+    }
+
     /**
      * NOTE: Must hold at least partition lock
      */
-    private void cleanUpErrorWhileWaiting_lockHeld(F2Partition partition, F2ClientEntry entry) {
+    private void cleanUpErrorWhileWaiting_partitionLockHeld(F2Partition partition, F2ClientEntry entry) {
         ResourceType resourceType = entry.resourceType;
         long resourceId = entry.resourceId;
 
