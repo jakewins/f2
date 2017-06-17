@@ -3,6 +3,8 @@ package com.jakewins.f2;
 import org.junit.Test;
 import org.neo4j.kernel.impl.locking.LockTracer;
 import org.neo4j.storageengine.api.lock.ResourceType;
+import sun.misc.Signal;
+import sun.misc.SignalHandler;
 
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -42,6 +44,7 @@ public class F2Client_Test {
         partitions.partition.lock.expect(
                 call("acquire", (args) -> {
                     assert args[0] == AcquireMode.BLOCKING;
+
                     F2ClientEntry expected = new F2ClientEntry(client, null, LockMode.EXCLUSIVE, NODE, 0, new int[]{0,0}, null);
                     assert args[1].equals(expected) : String.format("Expected %s got %s", expected, args[1]);
 
@@ -49,6 +52,7 @@ public class F2Client_Test {
                     return F2Lock.AcquireOutcome.ACQUIRED;
                 })
         );
+
 
         // When I acquire twice and release once on the client
         client.acquireExclusive(LockTracer.NONE, NODE, 0);

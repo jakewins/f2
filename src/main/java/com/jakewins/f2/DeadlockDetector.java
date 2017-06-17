@@ -1,7 +1,9 @@
 package com.jakewins.f2;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedList;
+import java.util.Set;
 
 class DeadlockDescription {
 
@@ -38,7 +40,7 @@ class DeadlockDescription {
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder("Deadlock[");
-        for(int linkIndex=0;linkIndex<chain.length;linkIndex++) {
+        for(int linkIndex=0;linkIndex<chain.length - 1;linkIndex++) {
             F2ClientEntry link = chain[linkIndex];
             sb.append(String.format("(%s)-[:WAITS_FOR]->(%s)->[:HELD_BY]->", link.owner, link.lock));
         }
@@ -132,7 +134,7 @@ class DeadlockDetector {
     DeadlockDescription detectDeadlock(F2Client source) {
         LinkedList<F2ClientEntry> detectedDeadlockChain = new LinkedList<>();
 
-        boolean foundDeadlock = detectRecursively(source, source, detectedDeadlockChain);
+        boolean foundDeadlock = detectRecursively(source, source, new HashSet<>(), detectedDeadlockChain, 0);
         if(!foundDeadlock) {
             return NONE;
         }
@@ -148,12 +150,21 @@ class DeadlockDetector {
         return new DeadlockDescription(chain);
     }
 
-    private boolean detectRecursively(F2Client source, F2Client blockee, LinkedList<F2ClientEntry> detectedDeadlockChain) {
+    private boolean detectRecursively(F2Client source, F2Client blockee, Set<F2Client> seen, LinkedList<F2ClientEntry> detectedDeadlockChain, int depth) {
         F2Lock lock;
 
         // Unblocked clients tell no tales
         if(blockee == null || blockee.waitsFor == null) {
             return false;
+        }
+
+        // If we've already explored this client, no need to do it again
+        if(!seen.add(blockee)) {
+            return false;
+        }
+
+        if(depth > 15) {
+            throw new RuntimeException(String.format("source: %s, blockee: %s, waitsFor: %s", source, blockee, blockee.waitsFor));
         }
 
         lock = blockee.waitsFor.lock;
@@ -172,7 +183,7 @@ class DeadlockDetector {
             if(lock.exclusiveHolder.owner == blockee) {
                 throw new RuntimeException("Uhhh " + lock.exclusiveHolder);
             }
-            if (detectRecursively(source, lock.exclusiveHolder.owner, detectedDeadlockChain)){
+            if (detectRecursively(source, lock.exclusiveHolder.owner, seen, detectedDeadlockChain, depth + 1)){
                 // Found a loop
                 detectedDeadlockChain.push(lock.exclusiveHolder.owner.waitsFor);
                 return true;
@@ -192,7 +203,7 @@ class DeadlockDetector {
                 return true;
             }
 
-            if(detectRecursively(source, current.owner, detectedDeadlockChain)) {
+            if(detectRecursively(source, current.owner, seen, detectedDeadlockChain, depth + 1)) {
                 // Found a loop
                 detectedDeadlockChain.push(current.owner.waitsFor);
                 return true;

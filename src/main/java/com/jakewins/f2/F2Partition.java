@@ -1,11 +1,15 @@
 package com.jakewins.f2;
 
 import org.neo4j.collection.primitive.Primitive;
+import org.neo4j.collection.primitive.PrimitiveLongIterator;
 import org.neo4j.collection.primitive.PrimitiveLongObjectMap;
 import org.neo4j.storageengine.api.lock.ResourceType;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.concurrent.locks.StampedLock;
+import java.util.stream.Stream;
 
 /**
  * F2 locks are split into partitions; operations within a partition must be guarded by the partition lock.
@@ -116,12 +120,21 @@ class F2Partition {
     void unlock() {
         partitionLock.unlock(currentHolderStamp);
     }
+
+    Stream<F2Lock> activeLocks() {
+        List<F2Lock> out = new ArrayList<>();
+        for (PrimitiveLongObjectMap<F2Lock> lockMap : locks) {
+            PrimitiveLongIterator iter = lockMap.iterator();
+            while (iter.hasNext()) {
+                out.add(lockMap.get(iter.next()));
+            }
+        }
+        return out.stream();
+    }
 }
 
 class F2Partitions {
     private final F2Partition[] partitions;
-    /** During stop-the-world, stores a lock stamp from each partition lock */
-    private final long[] stopTheWorldLockStamps;
     private final int bitwiseModulo;
 
     F2Partitions(int numResourceTypes, int numPartitions) {
@@ -129,7 +142,6 @@ class F2Partitions {
 
         this.bitwiseModulo = numPartitions - 1;
         this.partitions = new F2Partition[numPartitions];
-        this.stopTheWorldLockStamps = new long[numPartitions];
         for(int partitionIndex = 0; partitionIndex < numPartitions; partitionIndex++) {
             this.partitions[partitionIndex] = new F2Partition(partitionIndex, numResourceTypes);
         }
@@ -145,15 +157,15 @@ class F2Partitions {
 
     /** Lock every partition lock in  order of partition id (so this can be done without deadlocks */
     void stopTheWorld() {
-        for(int partitionIndex=0;partitionIndex < partitions.length;partitionIndex++) {
-            this.stopTheWorldLockStamps[partitionIndex] = this.partitions[partitionIndex].partitionLock.writeLock();
+        for (F2Partition partition : partitions) {
+            partition.lock();
         }
     }
 
     /** Resume spinning */
     void resumeTheWorld() {
-        for(int partitionIndex=0;partitionIndex < partitions.length;partitionIndex++) {
-            this.partitions[partitionIndex].partitionLock.unlock(this.stopTheWorldLockStamps[partitionIndex]);
+        for (F2Partition partition : partitions) {
+            partition.unlock();
         }
     }
 

@@ -37,6 +37,38 @@ public class DeadlockDetector_Test {
         assert deadlock.equals(expectedDeadlock) : String.format("Expected %s, found %s", expectedDeadlock, deadlock);
     }
 
+    @Test
+    public void testUnrelatedDeadlockDoesNotCauseInfiniteLoop() {
+        F2Lock lock1 = F2Lock_Test.newLock(1);
+        F2Lock lock2 = F2Lock_Test.newLock(2);
+        F2Client clientX = F2Lock_Test.newClient("X");
+        F2Client clientY = F2Lock_Test.newClient("Y");
+        F2Client clientZ = F2Lock_Test.newClient("Z");
+
+        F2ClientEntry clientXHoldsLockA = F2Lock_Test.newEntry(clientX, EXCLUSIVE);
+        F2ClientEntry clientYHoldsLockB = F2Lock_Test.newEntry(clientY, EXCLUSIVE);
+        F2ClientEntry clientXWaitsForLockB = F2Lock_Test.newEntry(clientX, EXCLUSIVE);
+        F2ClientEntry clientYWaitsForLockA = F2Lock_Test.newEntry(clientY, EXCLUSIVE);
+        F2ClientEntry clientZWaitsForLockB = F2Lock_Test.newEntry(clientZ, EXCLUSIVE);
+
+        lock1.acquire(BLOCKING, clientXHoldsLockA);
+        lock2.acquire(BLOCKING, clientYHoldsLockB);
+
+        lock1.acquire(BLOCKING, clientYWaitsForLockA);
+        clientY.waitsFor = clientYWaitsForLockA;
+
+        lock2.acquire(BLOCKING, clientXWaitsForLockB);
+        clientX.waitsFor = clientXWaitsForLockB;
+
+        lock2.acquire(BLOCKING, clientZWaitsForLockB);
+        clientZ.waitsFor = clientZWaitsForLockB;
+
+        DeadlockDescription expectedDeadlock = DeadlockDetector.NONE;
+        DeadlockDescription deadlock = new DeadlockDetector().detectDeadlock(clientZ);
+
+        assert deadlock.equals(expectedDeadlock) : String.format("Expected %s, found %s", expectedDeadlock, deadlock);
+    }
+
     static ResourceType NODE = new ResourceType() {
         @Override
         public int typeId() {

@@ -2,7 +2,6 @@ package com.jakewins.f2;
 
 import com.jakewins.f2.F2Lock.AcquireOutcome;
 
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -11,6 +10,7 @@ import java.util.stream.Stream;
 import com.jakewins.f2.infrastructure.SingleWaiterLatch;
 import org.neo4j.collection.primitive.Primitive;
 import org.neo4j.collection.primitive.PrimitiveLongObjectMap;
+import org.neo4j.kernel.DeadlockDetectedException;
 import org.neo4j.kernel.impl.locking.ActiveLock;
 import org.neo4j.kernel.impl.locking.LockTracer;
 import org.neo4j.kernel.impl.locking.Locks;
@@ -35,9 +35,9 @@ class Deadlock extends ClientAcquireOutcome {
 }
 
 class ClientAcquireError extends ClientAcquireOutcome {
-    private final Exception cause;
+    private final Throwable cause;
 
-    ClientAcquireError(Exception cause) {
+    ClientAcquireError(Throwable cause) {
         this.cause = cause;
     }
 
@@ -103,7 +103,7 @@ class F2Client implements Locks.Client {
             return;
         }
         if(outcome instanceof Deadlock) {
-            throw new RuntimeException(((Deadlock) outcome).deadlockDescription());
+            throw new DeadlockDetectedException(((Deadlock) outcome).deadlockDescription());
         }
         if(outcome instanceof ClientAcquireError) {
             throw ((ClientAcquireError) outcome).asRuntimeException();
@@ -166,7 +166,7 @@ class F2Client implements Locks.Client {
         }
 
         // Step 2: Release locks in each partition in bulk
-        for(int partitionIndex=0;partitionIndex<heldByPartition.length;partitionIndex++) {
+        for(int partitionIndex=0;partitionIndex < heldByPartition.length;partitionIndex++) {
             List<F2ClientEntry> entries = heldByPartition[partitionIndex];
             if(entries == null) {
                 continue;
@@ -219,7 +219,7 @@ class F2Client implements Locks.Client {
         AcquireOutcome outcome;
         partition.lock();
         try {
-            if(entry == null) {
+            if (entry == null) {
                 entry = partition.newClientEntry(this, lockMode, resourceType, resourceId);
             }
 
@@ -227,7 +227,7 @@ class F2Client implements Locks.Client {
 
             outcome = lock.acquire(acquireMode, entry);
 
-            if(outcome == AcquireOutcome.NOT_ACQUIRED) {
+            if (outcome == AcquireOutcome.NOT_ACQUIRED) {
                 releaseEntryIfUnused(partition, entry);
                 return ClientAcquireOutcome.NOT_ACQUIRED;
             }
@@ -235,7 +235,7 @@ class F2Client implements Locks.Client {
             partition.unlock();
         }
 
-        if(outcome == AcquireOutcome.ACQUIRED) {
+        if (outcome == AcquireOutcome.ACQUIRED) {
             entry.heldcount[lockMode.index] = 1;
             heldLocks[resourceType.typeId()].put(resourceId, entry);
             return ClientAcquireOutcome.ACQUIRED;
@@ -247,9 +247,9 @@ class F2Client implements Locks.Client {
             // At this point, we are on the wait list for the lock we want, and we *have* to wait for it.
             // The way this works is that, eventually, someone ahead of us on the wait list will grant us the lock
             // and wake us up via {@link latch}. Until then, we wait; if it takes to long we wake up and check deadlock.
-            for(;;) {
+            for (; ; ) {
                 boolean latchTripped = latch.tryAcquire(CHECK_DEADLOCK_AFTER_MS, TimeUnit.MILLISECONDS);
-                if(latchTripped) {
+                if (latchTripped) {
                     // Someone told us we got the lock!
                     entry.heldcount[lockMode.index] = 1;
                     heldLocks[resourceType.typeId()].put(resourceId, entry);
@@ -257,15 +257,17 @@ class F2Client implements Locks.Client {
                 } else {
                     // We timed out; need to do deadlock detection
                     Deadlock deadlock = detectDeadlock();
-                    if(deadlock != null) {
+                    if (deadlock != null) {
                         return deadlock;
                     }
                 }
             }
-        } catch(Exception e) {
+        } catch (Throwable e) {
             // Current thread was interrupted while waiting on a lock, not good.
             // We are on the wait list for the lock, so we can't simply leave, need cleanup.
-            cleanUpErrorWhileWaiting(partition, entry);
+            if(this.waitsFor != null) {
+                cleanUpErrorWhileWaiting(partition, entry);
+            }
             return new ClientAcquireError(e);
         }
     }

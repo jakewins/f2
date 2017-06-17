@@ -2,8 +2,13 @@ package com.jakewins.f2;
 
 import org.neo4j.kernel.impl.locking.Locks;
 import org.neo4j.storageengine.api.lock.ResourceType;
+import sun.misc.Signal;
+import sun.misc.SignalHandler;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.Lock;
 
 enum LockMode {
     EXCLUSIVE(0),
@@ -25,6 +30,65 @@ enum AcquireMode {
     NONBLOCKING
 }
 
+class LockGraphDump {
+
+    private static Set<F2Partitions> lockManagers = new HashSet<>();
+    private static Set<F2Client> clients = new HashSet<>();
+
+    static {
+        Signal.handle(new Signal("URG"), signal -> {
+            for(F2Partitions partitions : lockManagers) {
+                partitions.stopTheWorld();
+                try {
+                    for (int i = 0; i < partitions.numberOfPartitions(); i++) {
+                        F2Partition partition = partitions.getPartitionByIndex(i);
+                        partition.activeLocks().forEach((lock) -> {
+                            String lockHolder;
+                            if(lock.exclusiveHolder != null) {
+                                lockHolder = String.format("[(exclusive) %s]", lock.exclusiveHolder.owner);
+                            } else {
+                                StringBuilder sb = new StringBuilder("[(shared) ");
+                                for(F2ClientEntry entry=lock.sharedHolderList; entry != null; entry = entry.next) {
+                                    sb.append(entry.owner);
+                                    if(entry.next != null) {
+                                        sb.append(", ");
+                                    }
+                                }
+                                sb.append("]");
+                                lockHolder = sb.toString();
+                            }
+                            for(F2ClientEntry entry = lock.waitList; entry != null; entry = entry.next ) {
+                                System.err.printf("[%s] is waiting for %s to get %s\n", entry.owner, lockHolder, entry);
+                            }
+                        });
+                    }
+
+                    System.err.println("");
+
+                    for (F2Client client : clients) {
+                        System.err.printf("%s: %s\n", client, client.waitsFor);
+                    }
+
+                } finally {
+                    partitions.resumeTheWorld();
+                }
+            }
+        });
+    }
+
+    static synchronized void register(F2Partitions partitions) {
+        lockManagers.add(partitions);
+    }
+
+    static synchronized void register(F2Client client) {
+        clients.add(client);
+    }
+
+    static synchronized void unregister(F2Partitions partitions) {
+        lockManagers.remove(partitions);
+    }
+}
+
 public class F2Locks implements Locks {
     private final F2Partitions partitions;
     private final DeadlockDetector deadlockDetector;
@@ -35,12 +99,15 @@ public class F2Locks implements Locks {
         this.resourceTypes = resourceTypes;
         this.partitions = new F2Partitions(resourceTypes.length, numPartitions);
         this.deadlockDetector = new DeadlockDetector();
+
+        LockGraphDump.register(this.partitions);
     }
 
     @Override
     public Client newClient() {
         F2Client client = new F2Client(resourceTypes.length, partitions, deadlockDetector);
         client.setName(String.format("%d", clientCounter.getAndIncrement()));
+        LockGraphDump.register(client);
         return client;
     }
 
@@ -51,7 +118,7 @@ public class F2Locks implements Locks {
 
     @Override
     public void close() {
-
+        LockGraphDump.unregister(this.partitions);
     }
 }
 

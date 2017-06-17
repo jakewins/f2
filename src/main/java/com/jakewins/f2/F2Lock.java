@@ -160,7 +160,7 @@ class F2Lock {
         exclusiveHolder = null;
 
         // TODO: Handle upgrade lock (eg. same client is on shared lock list (or?))
-        return grantLockToWaiters();
+        return grantLockToWaiters(entry);
     }
 
     private ReleaseOutcome releaseShared(F2ClientEntry entry) {
@@ -177,7 +177,7 @@ class F2Lock {
 
         entry.next = null;
         if(sharedHolderList == null) {
-            return grantLockToWaiters();
+            return grantLockToWaiters(entry);
         }
         return LOCK_HELD;
     }
@@ -187,7 +187,7 @@ class F2Lock {
      * that all want a shared lock.
      * @return LOCK_IDLE if there was nobody waiting to get the lock, or LOCK_HELD if there was at least one waiter
      */
-    private ReleaseOutcome grantLockToWaiters() {
+    private ReleaseOutcome grantLockToWaiters(F2ClientEntry entry) {
         F2ClientEntry nextWaiter;
         ReleaseOutcome outcome = LOCK_IDLE;
         for(;;) {

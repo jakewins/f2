@@ -45,6 +45,7 @@ public class F2Locks_PerfTest {
         this.forsetiClient = shared.forseti.newClient();
         this.f2Client = shared.f2.newClient();
         this.random = new Random();
+        Thread.currentThread().setName("CLIENT " + this.f2Client);
     }
 
 //    @Benchmark
