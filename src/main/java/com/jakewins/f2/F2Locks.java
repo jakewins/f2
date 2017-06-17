@@ -11,8 +11,12 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 
 enum LockMode {
+    /** Client wants to ensure exclusive access to the resource */
     EXCLUSIVE(0),
-    SHARED(1);
+    /** Client wants to ensure nobody access to the resource, willing to share it with others who feel the same way. */
+    SHARED(1),
+    /** Client holds a share lock, wants to upgrade it to exclusive access */
+    UPGRADE(2);
 
     final int index;
 

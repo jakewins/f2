@@ -48,10 +48,16 @@ class F2Lock {
      * @return the outcome; grabbed, not grabbed, or on wait list
      */
     AcquireOutcome acquire(AcquireMode acquireMode, F2ClientEntry entry) {
+        assert entry.owner.waitsFor == null : String.format("Client marked as waiting, cannot acquire: Client(%s).waitsFor = %s, acquiring=%s", entry.owner, entry.owner.waitsFor, entry);
+
         if(entry.lockMode == LockMode.EXCLUSIVE) {
             return acquireExclusive(acquireMode, entry);
-        } else {
+        } else if(entry.lockMode == LockMode.SHARED) {
             return acquireShared(acquireMode, entry);
+        } else if(entry.lockMode == LockMode.UPGRADE) {
+            return acquireUpgrade(acquireMode, entry);
+        } else {
+            throw new AssertionError(String.format("Unknown lock mode %s", entry.lockMode));
         }
     }
 
@@ -61,10 +67,12 @@ class F2Lock {
      * @param entry the client's entry with this lock
      */
     ReleaseOutcome release(F2ClientEntry entry) {
-        if(entry.lockMode == LockMode.EXCLUSIVE) {
-            return releaseExclusive(entry);
-        } else {
+        if(entry.lockMode == LockMode.EXCLUSIVE || entry.lockMode == LockMode.UPGRADE) {
+            return releaseExclusiveOrUpgrade(entry);
+        } else if(entry.lockMode == LockMode.SHARED) {
             return releaseShared(entry);
+        } else {
+            throw new AssertionError(String.format("Unknown lock mode %s", entry.lockMode));
         }
     }
 
@@ -122,9 +130,24 @@ class F2Lock {
     }
 
     private AcquireOutcome acquireExclusive(AcquireMode acquireMode, F2ClientEntry entry) {
-        assert entry.owner.waitsFor == null : String.format("Client marked as waiting, cannot acquire: Client(%s).waitsFor = %s, acquiring=%s", entry.owner, entry.owner.waitsFor, entry);
-
         if(exclusiveHolder != null || sharedHolderList != null) {
+            return handleAcquireFailed(entry, acquireMode);
+        }
+
+        exclusiveHolder = entry;
+
+        entry.lock = this;
+
+        return ACQUIRED;
+    }
+
+    private AcquireOutcome acquireUpgrade(AcquireMode acquireMode, F2ClientEntry entry) {
+        assert exclusiveHolder == null : String.format("Client asking for upgrade on lock that is exclusively held: %s, %s", entry, exclusiveHolder);
+
+        // The upgrade can be granted immediately if the client asking for the upgrade is the only shared holder,
+        // otherwise the client must wait for all other shared holders to drop out before it can upgrade.
+        // We can test for this rapidly by checking if there's at least one `next` entry:
+        if(sharedHolderList.next != null) {
             return handleAcquireFailed(entry, acquireMode);
         }
 
@@ -141,29 +164,43 @@ class F2Lock {
             entry.lock = this;
             entry.owner.waitsFor = entry;
 
-            if(waitList == null) {
+            // Find the right place in the wait list to add us to. In a naive fairness sense, this would always
+            // be at the end of the wait list. However, there are several classes of deadlocks that can be avoided
+            // if we allow some flexibility to fairness, see specific scenarios in the loop below.
+            F2ClientEntry waitListSpot = null, nextWaitListEntry;
+            for(nextWaitListEntry = waitList; nextWaitListEntry != null; ) {
+                if(entry.lockMode == LockMode.UPGRADE) {
+                    // Placing an upgrade lock behind an exclusive waiter will immediately deadlock, because
+                    // the UPGRADE client holds a share lock, blocking the EXCLUSIVE client, and the EXCLUSIVE
+                    // client will block the UPGRADE request. Avoid this by letting the UPGRADE to go ahead of the
+                    // EXCLUSIVE request.
+                    if(nextWaitListEntry.lockMode == LockMode.EXCLUSIVE) {
+                        break;
+                    }
+                }
+
+                waitListSpot = nextWaitListEntry;
+                nextWaitListEntry = nextWaitListEntry.next;
+            }
+
+            if(waitListSpot == null) {
+                entry.next = waitList;
                 waitList = entry;
-                return MUST_WAIT;
+            } else {
+                entry.next = waitListSpot.next;
+                waitListSpot.next = entry;
             }
-
-            F2ClientEntry current;
-            for(current = waitList; current.next != null; ) {
-                current = current.next;
-            }
-
-            current.next = entry;
             return MUST_WAIT;
         }
         return NOT_ACQUIRED;
     }
 
-    private ReleaseOutcome releaseExclusive(F2ClientEntry entry) {
+    private ReleaseOutcome releaseExclusiveOrUpgrade(F2ClientEntry entry) {
         assert exclusiveHolder == entry : String.format("%s releasing exclusive lock held by %s.", entry, exclusiveHolder);
 
         exclusiveHolder = null;
 
-        // TODO: Handle upgrade lock (eg. same client is on shared lock list (or?))
-        return grantLockToWaiters(entry);
+        return grantLockToWaiters();
     }
 
     private ReleaseOutcome releaseShared(F2ClientEntry entry) {
@@ -179,8 +216,10 @@ class F2Lock {
         }
 
         entry.next = null;
-        if(sharedHolderList == null) {
-            return grantLockToWaiters(entry);
+
+        // Null check on exclusive holder because we may be releasing just shared portion of upgrade lock
+        if(exclusiveHolder == null && (sharedHolderList == null || canGrantUpgradeLock())) {
+            return grantLockToWaiters();
         }
         return LOCK_HELD;
     }
@@ -188,41 +227,41 @@ class F2Lock {
     /**
      * Hand the lock over to whoever is waiting for the lock; possibly many waiters if there's a list of clients
      * that all want a shared lock.
-     * @return LOCK_IDLE if there was nobody waiting to get the lock, or LOCK_HELD if there was at least one waiter
+     * @return LOCK_IDLE if nobody holds the lock, or LOCK_HELD if there's at least one lock holder
      */
-    private ReleaseOutcome grantLockToWaiters(F2ClientEntry entry) {
+    private ReleaseOutcome grantLockToWaiters() {
+        // Note that, in the case of releasing an upgrade lock, client may still hold a shared lock
+
         F2ClientEntry nextWaiter;
-        ReleaseOutcome outcome = LOCK_IDLE;
+        ReleaseOutcome outcome = sharedHolderList == null ? LOCK_IDLE : LOCK_HELD;
         for(;;) {
             nextWaiter = waitList;
             if(nextWaiter == null) {
                 return outcome;
             }
             if(nextWaiter.lockMode == LockMode.EXCLUSIVE) {
-                if(outcome != LOCK_IDLE) {
-                    // If the outcome has been marked as not idle, there are already shared grantees;
-                    // meaning we can't grant this exclusive lock. Stop granting and return.
+                if(sharedHolderList != null) {
+                    // Looks like we've already handed out shared locks, so this exclusive needs to keep waiting
                     return outcome;
                 }
+
+                // Mark as exclusive owner
+                exclusiveHolder = nextWaiter;
 
                 // Remove from wait list
                 waitList = nextWaiter.next;
                 nextWaiter.next = null;
-
-                // Mark as exclusive owner
-                exclusiveHolder = nextWaiter;
 
                 // Signal the waiting client
                 nextWaiter.owner.waitsFor = null;
                 nextWaiter.owner.latch.release();
                 return LOCK_HELD;
-            } else {
+            } else if(nextWaiter.lockMode == LockMode.SHARED){
                 // Highlight that the lock has at least one new holder
                 outcome = LOCK_HELD;
 
                 // Remove from wait list
                 waitList = nextWaiter.next;
-                nextWaiter.next = null;
 
                 // Add to shared list
                 nextWaiter.next = sharedHolderList;
@@ -231,6 +270,25 @@ class F2Lock {
                 // Signal the waiting client
                 nextWaiter.owner.waitsFor = null;
                 nextWaiter.owner.latch.release();
+            } else if(nextWaiter.lockMode == LockMode.UPGRADE) {
+                if(sharedHolderList != null && sharedHolderList.next != null) {
+                    // There's at least two shared holders; can't grant upgrade until all but the one held by the
+                    // upgrader remains.
+                    return outcome;
+                }
+
+                // Mark as exclusive owner
+                exclusiveHolder = nextWaiter;
+
+                // Remove from wait list
+                waitList = nextWaiter.next;
+                nextWaiter.next = null;
+
+                // Signal the waiting client
+                nextWaiter.owner.waitsFor = null;
+                nextWaiter.owner.latch.release();
+            } else {
+                throw new AssertionError(String.format("Unknown lock mode: %s", nextWaiter));
             }
         }
     }
@@ -252,5 +310,9 @@ class F2Lock {
         }
 
         assert false : "Asked to removeLock client from wait list, but client was not on it.";
+    }
+
+    private boolean canGrantUpgradeLock() {
+        return sharedHolderList.next == null && waitList != null && waitList.lockMode == LockMode.UPGRADE;
     }
 }

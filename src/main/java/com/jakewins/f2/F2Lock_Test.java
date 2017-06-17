@@ -16,6 +16,7 @@ import static com.jakewins.f2.F2Lock.AcquireOutcome.MUST_WAIT;
 import static com.jakewins.f2.F2Lock.AcquireOutcome.NOT_ACQUIRED;
 import static com.jakewins.f2.LockMode.EXCLUSIVE;
 import static com.jakewins.f2.LockMode.SHARED;
+import static com.jakewins.f2.LockMode.UPGRADE;
 import static java.util.Arrays.asList;
 
 public class F2Lock_Test {
@@ -65,6 +66,108 @@ public class F2Lock_Test {
                 noSharedHolders,
                 waitListIsEmpty,
                 noCurrentHolderIsWaiting));
+    }
+
+    @Test
+    public void testUncontendedUpgrade() {
+        F2Client clientA = newClient("A");
+        F2ClientEntry clientASharedLock = newEntry(clientA, SHARED);
+        F2ClientEntry clientAUpgradeLock = newEntry(clientA, UPGRADE);
+
+        test(
+            given(
+                    acquireShared(clientASharedLock)),
+            when(
+                    acquireUpgrade(clientAUpgradeLock)),
+            then(
+                    lockIsHeldExclusivelyBy(clientAUpgradeLock),
+                    lockIsHeldSharedBy(clientASharedLock),
+                    waitListIsEmpty,
+                    noCurrentHolderIsWaiting));
+    }
+
+    @Test
+    public void testUpgradePreemptsExclusiveWaiterToAvoidDeadlock() {
+        F2Client clientA = newClient("A");
+        F2ClientEntry clientASharedLock = newEntry(clientA, SHARED);
+        F2ClientEntry clientAUpgradeLock = newEntry(clientA, UPGRADE);
+        F2ClientEntry clientBSharedLock = newEntry(newClient("B"), SHARED);
+        F2ClientEntry clientCExclusiveLock = newEntry(newClient("C"), EXCLUSIVE);
+
+        test(
+                given(
+                        acquireShared(clientASharedLock),
+                        acquireShared(clientBSharedLock),
+                        acquireExclusive(clientCExclusiveLock)), // Eg. client B is waiting for an exclusive lock
+                when(
+                        acquireUpgrade(clientAUpgradeLock)),
+                then(
+                        noExclusiveHolder,
+                        lockIsHeldSharedBy(clientBSharedLock, clientASharedLock),
+                        waitListIs(clientAUpgradeLock, clientCExclusiveLock)));
+    }
+
+    @Test
+    public void testReleasingSharedThatBlocksUpgradeGrantsUpgrade() {
+        F2Client clientA = newClient("A");
+        F2ClientEntry clientASharedLock = newEntry(clientA, SHARED);
+        F2ClientEntry clientAUpgradeLock = newEntry(clientA, UPGRADE);
+        F2ClientEntry clientBSharedLock = newEntry(newClient("B"), SHARED);
+
+        test(
+                given(
+                        acquireShared(clientASharedLock),
+                        acquireShared(clientBSharedLock),
+                        acquireUpgrade(clientAUpgradeLock)), // Which will block on client B's shared lock
+                when(
+                        release(clientBSharedLock)),
+                then(
+                        lockIsHeldExclusivelyBy(clientAUpgradeLock),
+                        lockIsHeldSharedBy(clientASharedLock),
+                        waitListIsEmpty,
+                        noCurrentHolderIsWaiting));
+    }
+
+    @Test
+    public void testReleasingSharedPortionOfUpgradeDoesNotGrantWaitersAccess() {
+        F2Client clientA = newClient("A");
+        F2ClientEntry clientASharedLock = newEntry(clientA, SHARED);
+        F2ClientEntry clientAUpgradeLock = newEntry(clientA, UPGRADE);
+        F2ClientEntry clientBSharedLock = newEntry(newClient("B"), SHARED);
+
+        test(
+                given(
+                        acquireShared(clientASharedLock),
+                        acquireUpgrade(clientAUpgradeLock),
+                        acquireShared(clientBSharedLock)), // Waiting on upgrade lock
+                when(
+                        release(clientASharedLock)),
+                then(
+                        lockIsHeldExclusivelyBy(clientAUpgradeLock),
+                        noSharedHolders,
+                        waitListIs(clientBSharedLock),
+                        noCurrentHolderIsWaiting));
+    }
+
+    @Test
+    public void testReleasingExclusivePortionOfUpgradeLockGrantsSharedWaitersAccess() {
+        F2Client clientA = newClient("A");
+        F2ClientEntry clientASharedLock = newEntry(clientA, SHARED);
+        F2ClientEntry clientAUpgradeLock = newEntry(clientA, UPGRADE);
+        F2ClientEntry clientBSharedLock = newEntry(newClient("B"), SHARED);
+
+        test(
+                given(
+                        acquireShared(clientASharedLock),
+                        acquireUpgrade(clientAUpgradeLock),
+                        acquireShared(clientBSharedLock)), // Waiting on upgrade lock
+                when(
+                        release(clientAUpgradeLock)),
+                then(
+                        noExclusiveHolder,
+                        lockIsHeldSharedBy(clientBSharedLock, clientASharedLock),
+                        waitListIsEmpty,
+                        noCurrentHolderIsWaiting));
     }
 
     @Test
@@ -135,7 +238,7 @@ public class F2Lock_Test {
 
         AcquireOutcome outcome = actionUnderTest.apply(lock);
 
-        assert outcome == expectedOutcome : String.format("Expected %s but got %s", expectedOutcome.name(), outcome.name());
+        assert expectedOutcome == null || outcome == expectedOutcome : String.format("Expected %s but got %s", expectedOutcome.name(), outcome.name());
         asList(assertions).forEach( a -> a.accept(lock) );
     }
 
@@ -148,6 +251,8 @@ public class F2Lock_Test {
         assertions.accept(lock);
     }
 
+
+    // ACQUIRE SHARED
     private static Function<F2Lock, AcquireOutcome> acquireShared(F2ClientEntry entry, AcquireMode mode) {
         return (l) -> {
             entry.lockMode = LockMode.SHARED;
@@ -162,17 +267,12 @@ public class F2Lock_Test {
     }
     private static Function<F2Lock, AcquireOutcome> acquireShared = acquireShared(newEntry(newClient()), BLOCKING);
 
+
+    // ACQUIRE EXCLUSIVE
     private static Function<F2Lock, AcquireOutcome> acquireExclusive(F2ClientEntry entry, AcquireMode mode) {
         return (l) -> {
             entry.lockMode = EXCLUSIVE;
             return l.acquire(mode, entry);
-        };
-    }
-
-    private static Function<F2Lock, AcquireOutcome> release(F2ClientEntry entry) {
-        return (l) -> {
-            l.release(entry);
-            return null;
         };
     }
 
@@ -183,6 +283,26 @@ public class F2Lock_Test {
         return acquireExclusive(entry, BLOCKING);
     }
     private static Function<F2Lock, AcquireOutcome> acquireExclusive = acquireExclusive(newEntry(newClient()), BLOCKING);
+
+
+    // ACQUIRE UPGRADE
+    private static Function<F2Lock, AcquireOutcome> acquireUpgrade(F2ClientEntry entry, AcquireMode mode) {
+        return (l) -> {
+            entry.lockMode = UPGRADE;
+            return l.acquire(mode, entry);
+        };
+    }
+    private static Function<F2Lock, AcquireOutcome> acquireUpgrade(F2ClientEntry entry) {
+        return acquireUpgrade(entry, BLOCKING);
+    }
+
+    // OTHER
+    private static Function<F2Lock, AcquireOutcome> release(F2ClientEntry entry) {
+        return (l) -> {
+            l.release(entry);
+            return null;
+        };
+    }
 
     private static Consumer<F2Lock> given(Function<F2Lock, AcquireOutcome> ... actions) {
         return lock -> asList(actions).forEach(a -> a.apply(lock));
@@ -200,6 +320,23 @@ public class F2Lock_Test {
     }
 
     private static Consumer<F2Lock> waitListIsEmpty = (lock) -> { assert lock.waitList == null : "There should be no wait list, found " + lock.waitList; };
+    private static Consumer<F2Lock> waitListIs(F2ClientEntry ... waiters) {
+        return (lock) -> {
+            Iterator<F2ClientEntry> nextExpected = asList(waiters).iterator();
+            F2ClientEntry current = lock.waitList;
+            while(current != null) {
+                assert nextExpected.hasNext() : "There are more waiters than expected, first additional: " + current;
+
+                F2ClientEntry expected = nextExpected.next();
+                assert current == expected: "Expected " + expected + " to be next waiter, but found " + current;
+
+                current = current.next;
+            }
+            assert !nextExpected.hasNext() : "Expected " + nextExpected.next() + " to be on wait list.";
+        };
+    }
+
+
     private static Consumer<F2Lock> noExclusiveHolder = (lock) -> { assert lock.exclusiveHolder == null : "There should be no exclusive holder, found " + lock.exclusiveHolder; };
     private static Consumer<F2Lock> noSharedHolders = (lock) -> { assert lock.sharedHolderList == null : "There should be shared holder, found " + lock.sharedHolderList; };
     private static Consumer<F2Lock> lockIsHeldExclusivelyBy(F2ClientEntry holder) {
