@@ -214,9 +214,9 @@ class F2Client implements Locks.Client {
         }
 
         // We don't hold this lock already, go to work on the relevant partition
-        F2Partition partition = partitions.getPartition(resourceId);
         F2Lock lock;
         AcquireOutcome outcome;
+        F2Partition partition = partitions.getPartition(resourceId);
         partition.lock();
         try {
             if (entry == null) {
@@ -251,6 +251,7 @@ class F2Client implements Locks.Client {
                 boolean latchTripped = latch.tryAcquire(CHECK_DEADLOCK_AFTER_MS, TimeUnit.MILLISECONDS);
                 if (latchTripped) {
                     // Someone told us we got the lock!
+                    assert waitsFor == null: String.format("Should not be marked waiting if lock was granted, %s.waitsFor=%s", this, waitsFor);
                     entry.heldcount[lockMode.index] = 1;
                     heldLocks[resourceType.typeId()].put(resourceId, entry);
                     return ClientAcquireOutcome.ACQUIRED;

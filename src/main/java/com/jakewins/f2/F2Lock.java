@@ -95,6 +95,7 @@ class F2Lock {
             }
         }
         removeFromWaitList(entry);
+        entry.owner.waitsFor = null;
         if(exclusiveHolder == null && sharedHolderList == null) {
             return LOCK_IDLE;
         }
@@ -121,6 +122,8 @@ class F2Lock {
     }
 
     private AcquireOutcome acquireExclusive(AcquireMode acquireMode, F2ClientEntry entry) {
+        assert entry.owner.waitsFor == null : String.format("Client marked as waiting, cannot acquire: Client(%s).waitsFor = %s, acquiring=%s", entry.owner, entry.owner.waitsFor, entry);
+
         if(exclusiveHolder != null || sharedHolderList != null) {
             return handleAcquireFailed(entry, acquireMode);
         }
@@ -204,6 +207,7 @@ class F2Lock {
 
                 // Remove from wait list
                 waitList = nextWaiter.next;
+                nextWaiter.next = null;
 
                 // Mark as exclusive owner
                 exclusiveHolder = nextWaiter;
@@ -218,6 +222,7 @@ class F2Lock {
 
                 // Remove from wait list
                 waitList = nextWaiter.next;
+                nextWaiter.next = null;
 
                 // Add to shared list
                 nextWaiter.next = sharedHolderList;
@@ -240,8 +245,6 @@ class F2Lock {
                 } else {
                     prev.next = entry.next;
                 }
-                entry.owner.waitsFor = null;
-                entry.owner.latch.release();
                 return;
             }
             prev = current;

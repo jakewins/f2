@@ -82,24 +82,32 @@ public class F2Locks_PerfTest {
 //    }
 
     @Benchmark
-    public void f2AcquireCombination() throws AcquireLockTimeoutException {
+    public void f2SchemaExclusiveCombintation(SharedState shared) throws AcquireLockTimeoutException {
+        schemaPlusExclusiveCombination(shared.f2);
+    }
+
+    @Benchmark
+    public void forsetiSchemaExclusiveCombintation(SharedState shared) throws AcquireLockTimeoutException {
+        schemaPlusExclusiveCombination(shared.forseti);
+    }
+
+    private void schemaPlusExclusiveCombination(Locks locks) throws AcquireLockTimeoutException {
         for(;;) {
-            try {
+            try (Locks.Client client = locks.newClient()) {
                 // Always acquire the schema lock
-                f2Client.acquireShared(LockTracer.NONE, SCHEMA, 0);
+                client.acquireShared(LockTracer.NONE, SCHEMA, 0);
 
                 // Then acquire 5 random locks
                 for (int i = 0; i < 5; i++) {
-                    f2Client.acquireExclusive(LockTracer.NONE, NODE, random.nextInt(100));
+                    client.acquireExclusive(LockTracer.NONE, NODE, random.nextInt(100));
                 }
                 return;
             } catch (DeadlockDetectedException e) {
                 // Retry
-            } finally {
-                f2Client.close(); // technically not allowed to reuse after this, but current impl allows this
             }
         }
     }
+
 
     public static void main(String[] args) throws RunnerException {
         Options opt = new OptionsBuilder()

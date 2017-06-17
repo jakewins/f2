@@ -181,7 +181,7 @@ class DeadlockDetector {
                 throw new RuntimeException("Waitsfor record with owner == null: " + lock.exclusiveHolder);
             }
             if(lock.exclusiveHolder.owner == blockee) {
-                throw new RuntimeException("Uhhh " + lock.exclusiveHolder);
+                throw new RuntimeException(String.format("Uhhh %s, waitsFor:%s source:%s", lock.exclusiveHolder, lock.exclusiveHolder.owner.waitsFor, source));
             }
             if (detectRecursively(source, lock.exclusiveHolder.owner, seen, detectedDeadlockChain, depth + 1)){
                 // Found a loop
