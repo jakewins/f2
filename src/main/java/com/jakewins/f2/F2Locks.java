@@ -16,7 +16,9 @@ enum LockMode {
     /** Client wants to ensure nobody access to the resource, willing to share it with others who feel the same way. */
     SHARED(1),
     /** Client holds a share lock, wants to upgrade it to exclusive access */
-    UPGRADE(2);
+    UPGRADE(2),
+    /** Client holds no lock, useful for some control flows */
+    NONE(4);
 
     final int index;
 

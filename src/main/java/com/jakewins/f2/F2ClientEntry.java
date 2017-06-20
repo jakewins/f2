@@ -29,23 +29,26 @@ class F2ClientEntry {
     F2ClientEntry next;
 
     /**
-     * Used by {@link #owner} without synchronization; count number of re-entrant locks held to avoid globally
-     * coordinating when grabbing locks already held.
+     * If owner holds several lock types on the same lock, this will point to the next entry for the same owner
      */
-    int[] heldcount = new int[LockMode.numberOfModes()];
+    F2ClientEntry ownerNext;
+
+    /**
+     * Used by owner to track reentrancy - how many times has the user asked to acquire this lock?
+     */
+    int reentrancyCounter = 0;
 
     F2ClientEntry() {
 
     }
 
     F2ClientEntry(F2Client owner, F2Lock lock, LockMode lockMode,
-                         ResourceType resourceType, long resourceId, int[] heldCount, F2ClientEntry next) {
+                         ResourceType resourceType, long resourceId, F2ClientEntry next) {
         this.owner = owner;
         this.lock = lock;
         this.lockMode = lockMode;
         this.resourceType = resourceType;
         this.resourceId = resourceId;
-        this.heldcount = heldCount;
         this.next = next;
     }
 
@@ -70,7 +73,7 @@ class F2ClientEntry {
         if (lockMode != that.lockMode) return false;
         if (resourceType != null ? !resourceType.equals(that.resourceType) : that.resourceType != null) return false;
         if (next != null ? !next.equals(that.next) : that.next != null) return false;
-        return Arrays.equals(heldcount, that.heldcount);
+        return ownerNext != null ? ownerNext.equals(that.ownerNext) : that.ownerNext == null;
 
     }
 
@@ -82,16 +85,7 @@ class F2ClientEntry {
         result = 31 * result + (resourceType != null ? resourceType.hashCode() : 0);
         result = 31 * result + (int) (resourceId ^ (resourceId >>> 32));
         result = 31 * result + (next != null ? next.hashCode() : 0);
-        result = 31 * result + Arrays.hashCode(heldcount);
+        result = 31 * result + (ownerNext != null ? ownerNext.hashCode() : 0);
         return result;
-    }
-
-    boolean holdsLocks() {
-        for(int held : heldcount) {
-            if(held > 0) {
-                return true;
-            }
-        }
-        return false;
     }
 }

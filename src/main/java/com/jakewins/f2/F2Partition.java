@@ -100,10 +100,7 @@ class F2Partition {
         entry.lockMode = null;
         entry.resourceType = null;
         entry.resourceId = -1;
-
-        for(int i=0;i<entry.heldcount.length;i++) {
-            entry.heldcount[i] = 0;
-        }
+        entry.reentrancyCounter = 0;
 
         entry.next = nextFreeClientEntry;
         nextFreeClientEntry = entry;

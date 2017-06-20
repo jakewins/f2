@@ -2,14 +2,11 @@ package com.jakewins.f2;
 
 import com.jakewins.f2.F2Lock.AcquireOutcome;
 
-import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import com.jakewins.f2.infrastructure.SingleWaiterLatch;
-import org.neo4j.collection.primitive.Primitive;
-import org.neo4j.collection.primitive.PrimitiveLongObjectMap;
 import org.neo4j.kernel.DeadlockDetectedException;
 import org.neo4j.kernel.impl.locking.ActiveLock;
 import org.neo4j.kernel.impl.locking.LockTracer;
@@ -67,15 +64,12 @@ class F2Client implements Locks.Client {
 
     private final F2Partitions partitions;
     private final DeadlockDetector deadlockDetector;
-    private final PrimitiveLongObjectMap<F2ClientEntry>[] heldLocks;
+    private final F2ClientLocks heldLocks;
 
     F2Client(int numResourceTypes, F2Partitions partitions, DeadlockDetector deadlockDetector) {
         this.partitions = partitions;
         this.deadlockDetector = deadlockDetector;
-        this.heldLocks = new PrimitiveLongObjectMap[numResourceTypes];
-        for(int i=0;i<numResourceTypes;i++) {
-            this.heldLocks[i] = Primitive.longObjectMap(32);
-        }
+        this.heldLocks = new F2ClientLocks(numResourceTypes);
     }
 
     void setName(String name) {
@@ -148,22 +142,9 @@ class F2Client implements Locks.Client {
 
     @Override
     public void close() {
-        // TODO: Verify escape analysis puts this on the stack
-        List<F2ClientEntry>[] heldByPartition = new List[partitions.numberOfPartitions()];
-
         // Step 1: Group locks by partition, so we can release in each partition in bulk
-        for (PrimitiveLongObjectMap<F2ClientEntry> locks : heldLocks) {
-            locks.visitEntries((resourceId, entry) -> {
-                F2Partition partition = partitions.getPartition(resourceId);
-                List<F2ClientEntry> heldInThisPartition = heldByPartition[partition.index()];
-                if(heldInThisPartition == null) {
-                    heldByPartition[partition.index()] = heldInThisPartition = new LinkedList<>();
-                }
-                heldInThisPartition.add(entry);
-                return false;
-            });
-            locks.clear();
-        }
+        List<F2ClientEntry>[] heldByPartition = new List[partitions.numberOfPartitions()];
+        heldLocks.releaseAll(partitions, heldByPartition);
 
         // Step 2: Release locks in each partition in bulk
         for(int partitionIndex=0;partitionIndex < heldByPartition.length;partitionIndex++) {
@@ -202,33 +183,29 @@ class F2Client implements Locks.Client {
         return name;
     }
 
-    private ClientAcquireOutcome acquire(AcquireMode acquireMode, LockMode lockMode, ResourceType resourceType, long resourceId) {
+    private ClientAcquireOutcome acquire(AcquireMode acquireMode, LockMode requestedLockMode, ResourceType resourceType, long resourceId) {
+        F2Lock lock;
+        F2ClientEntry entry;
+        AcquireOutcome outcome;
+
         // If we already hold this lock, no need to globally synchronize
-        // TODO there is some sort of bug with reentrancy
-        F2ClientEntry entry = heldLocks[resourceType.typeId()].get(resourceId);
-        if(entry != null) {
-            if(entry.heldcount[lockMode.index] > 0) {
-                entry.heldcount[lockMode.index] += 1;
-                return ClientAcquireOutcome.ACQUIRED;
-            }
+        LockMode lockMode = heldLocks.tryLocalAcquire(resourceType, resourceId, requestedLockMode);
+        if(lockMode == LockMode.NONE) {
+            return ClientAcquireOutcome.ACQUIRED;
         }
 
         // We don't hold this lock already, go to work on the relevant partition
-        F2Lock lock;
-        AcquireOutcome outcome;
         F2Partition partition = partitions.getPartition(resourceId);
         partition.lock();
         try {
-            if (entry == null) {
-                entry = partition.newClientEntry(this, lockMode, resourceType, resourceId);
-            }
+            entry = partition.newClientEntry(this, lockMode, resourceType, resourceId);
 
             lock = partition.getOrCreateLock(resourceType, resourceId);
 
             outcome = lock.acquire(acquireMode, entry);
 
             if (outcome == AcquireOutcome.NOT_ACQUIRED) {
-                releaseEntryIfUnused(partition, entry);
+                partition.releaseClientEntry(entry);
                 return ClientAcquireOutcome.NOT_ACQUIRED;
             }
         } finally {
@@ -236,8 +213,7 @@ class F2Client implements Locks.Client {
         }
 
         if (outcome == AcquireOutcome.ACQUIRED) {
-            entry.heldcount[lockMode.index] = 1;
-            heldLocks[resourceType.typeId()].put(resourceId, entry);
+            heldLocks.globallyAcquired(entry);
             return ClientAcquireOutcome.ACQUIRED;
         }
 
@@ -252,8 +228,7 @@ class F2Client implements Locks.Client {
                 if (latchTripped) {
                     // Someone told us we got the lock!
                     assert waitsFor == null: String.format("Should not be marked waiting if lock was granted, %s.waitsFor=%s", this, waitsFor);
-                    entry.heldcount[lockMode.index] = 1;
-                    heldLocks[resourceType.typeId()].put(resourceId, entry);
+                    heldLocks.globallyAcquired(entry);
                     return ClientAcquireOutcome.ACQUIRED;
                 } else {
                     // We timed out; need to do deadlock detection
@@ -275,13 +250,8 @@ class F2Client implements Locks.Client {
 
     private void release(LockMode lockMode, ResourceType resourceType, long resourceId) {
         // Start by reducing the count of locally held locks; if we're lucky that's all we need
-        F2ClientEntry entry = heldLocks[resourceType.typeId()].get(resourceId);
-
-        assert entry != null : "Releasing lock that's not held";
-        assert entry.heldcount[lockMode.index] > 0 : "Releasing a lock the client does not hold.";
-
-        entry.heldcount[lockMode.index] -= 1;
-        if(entry.heldcount[lockMode.index] > 0) {
+        F2ClientEntry entry = heldLocks.tryLocalRelease(lockMode, resourceType, resourceId);
+        if(entry == null) {
             return;
         }
 
@@ -301,7 +271,8 @@ class F2Client implements Locks.Client {
         long resourceId = entry.resourceId;
 
         F2Lock.ReleaseOutcome outcome = entry.lock.release(entry);
-        releaseEntryIfUnused(partition, entry);
+        partition.releaseClientEntry(entry);
+
 
         if(outcome == F2Lock.ReleaseOutcome.LOCK_HELD) {
             return;
@@ -356,16 +327,6 @@ class F2Client implements Locks.Client {
             // If the lock ended up idle, we need to remove it from the lock table before wrapping up
             partition.removeLock(resourceType, resourceId);
         }
-        releaseEntryIfUnused(partition, entry);
-    }
-
-    /**
-     * NOTE: Must hold at least partition lock
-     */
-    private void releaseEntryIfUnused(F2Partition partition, F2ClientEntry entry) {
-        if(!entry.holdsLocks()) {
-            heldLocks[entry.resourceType.typeId()].remove(entry.resourceId);
-            partition.releaseClientEntry(entry);
-        }
+        partition.releaseClientEntry(entry);
     }
 }

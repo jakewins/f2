@@ -3,8 +3,6 @@ package com.jakewins.f2;
 import org.junit.Test;
 import org.neo4j.kernel.impl.locking.LockTracer;
 import org.neo4j.storageengine.api.lock.ResourceType;
-import sun.misc.Signal;
-import sun.misc.SignalHandler;
 
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -21,12 +19,7 @@ public class F2Client_Test {
 
         // Expect
         partitions.partition.lock.expect(
-            call("acquire", (args) -> {
-                assert args[0] == AcquireMode.BLOCKING;
-                F2ClientEntry expected = new F2ClientEntry(client, null, LockMode.EXCLUSIVE, NODE, 0, new int[]{0,0}, null);
-                assert args[1].equals(expected) : String.format("Expected %s got %s", expected, args[1]);
-                return F2Lock.AcquireOutcome.ACQUIRED;
-            })
+            acquire(new F2ClientEntry(client, null, LockMode.EXCLUSIVE, NODE, 0, null))
         );
 
         // When I acquire the same lock multiple times, the global lock only gets grabbed once
@@ -42,15 +35,7 @@ public class F2Client_Test {
 
         // Expect one request to acquire
         partitions.partition.lock.expect(
-                call("acquire", (args) -> {
-                    assert args[0] == AcquireMode.BLOCKING;
-
-                    F2ClientEntry expected = new F2ClientEntry(client, null, LockMode.EXCLUSIVE, NODE, 0, new int[]{0,0}, null);
-                    assert args[1].equals(expected) : String.format("Expected %s got %s", expected, args[1]);
-
-                    ((F2ClientEntry)args[1]).lock = partitions.partition.lock;
-                    return F2Lock.AcquireOutcome.ACQUIRED;
-                })
+                acquire(new F2ClientEntry(client, null, LockMode.EXCLUSIVE, NODE, 0, null))
         );
 
 
@@ -61,14 +46,52 @@ public class F2Client_Test {
 
         // Expect one request to release
         partitions.partition.lock.expect(
-                call("release", (args) -> {
-                    F2ClientEntry expected = new F2ClientEntry(client, partitions.partition.lock, LockMode.EXCLUSIVE, NODE, 0, new int[]{0,0}, null);
-                    assert args[0].equals(expected) : String.format("Expected %s got %s", expected, args[0]);
-                    return F2Lock.ReleaseOutcome.LOCK_IDLE;
-                })
+                release(new F2ClientEntry(client, partitions.partition.lock, LockMode.EXCLUSIVE, NODE, 0, null))
         );
 
         // When I release the second time
+        client.releaseExclusive(NODE, 0);
+    }
+
+    @Test
+    public void testSimpleUpgrade() {
+        StubF2Partitions partitions = new StubF2Partitions();
+        F2Client client = new F2Client(8, partitions, null);
+
+        // Expect acquire shared and acquire upgrade
+        partitions.partition.lock.expect(
+                acquire(new F2ClientEntry(client, null, LockMode.SHARED, NODE, 0, null)),
+                acquire(new F2ClientEntry(client, null, LockMode.UPGRADE, NODE, 0, null))
+        );
+
+        // When I acquire shared and then exclusive
+        client.acquireShared(LockTracer.NONE, NODE, 0);
+        client.acquireExclusive(LockTracer.NONE, NODE, 0);
+    }
+
+    @Test
+    public void testReleaseSharedAfterUpgrade() {
+        StubF2Partitions partitions = new StubF2Partitions();
+        F2Client client = new F2Client(8, partitions, null);
+
+        // Expect acquire shared and acquire upgrade
+        partitions.partition.lock.expect(
+                acquire(new F2ClientEntry(client, null, LockMode.SHARED, NODE, 0, null)),
+                acquire(new F2ClientEntry(client, null, LockMode.UPGRADE, NODE, 0, null))
+        );
+
+        // When I acquire shared and then exclusive
+        client.acquireShared(LockTracer.NONE, NODE, 0);
+        client.acquireExclusive(LockTracer.NONE, NODE, 0);
+
+        // Then expect release shared followed by release upgrade if I release the share lock first
+        partitions.partition.lock.expect(
+                release(new F2ClientEntry(client, partitions.partition.lock, LockMode.SHARED, NODE, 0, null)),
+                release(new F2ClientEntry(client, partitions.partition.lock, LockMode.UPGRADE, NODE, 0, null))
+        );
+
+        // When I release shared and then exclusive
+        client.releaseShared(NODE, 0);
         client.releaseExclusive(NODE, 0);
     }
 
@@ -137,7 +160,7 @@ public class F2Client_Test {
                 throw new AssertionError(String.format("Expected %s%s, but %s#%s(%s) was just called.", this, next.method, this, method, Arrays.toString(args)));
             }
 
-            return (T)next.behavior.apply(args);
+            return (T)next.behavior.apply(this, args);
         }
 
         void expect(Call ... calls) {
@@ -146,7 +169,7 @@ public class F2Client_Test {
     }
 
     static class Call {
-        static Call call(String method, Function<Object[], Object> behavior) {
+        static Call call(String method, BiFunction<F2Lock, Object[], Object> behavior) {
             Call call = new Call();
             call.method = method;
             call.behavior = behavior;
@@ -154,6 +177,23 @@ public class F2Client_Test {
         }
 
         String method;
-        Function<Object[], Object> behavior;
+        BiFunction<F2Lock, Object[], Object> behavior;
+    }
+
+    Call acquire(F2ClientEntry expected) {
+        return call("acquire", (lock, args) -> {
+            assert args[0] == AcquireMode.BLOCKING;
+            assert args[1].equals(expected) : String.format("Expected %s got %s", expected, args[1]);
+
+            ((F2ClientEntry)args[1]).lock = lock;
+            return F2Lock.AcquireOutcome.ACQUIRED;
+        });
+    }
+
+    Call release(F2ClientEntry expected) {
+        return call("release", (lock, args) -> {
+            assert args[0].equals(expected) : String.format("Expected %s got %s", expected, args[0]);
+            return F2Lock.ReleaseOutcome.LOCK_HELD;
+        });
     }
 }
