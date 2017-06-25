@@ -1,9 +1,6 @@
 package com.jakewins.f2;
 
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.Set;
+import java.util.*;
 
 class DeadlockDescription {
 
@@ -39,13 +36,18 @@ class DeadlockDescription {
 
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder("Deadlock[");
+        ClientAliaser aliases = new ClientAliaser();
+
+        StringBuilder sb = new StringBuilder("Deadlock ");
         for(int linkIndex=0;linkIndex<chain.length - 1;linkIndex++) {
             F2ClientEntry link = chain[linkIndex];
-            sb.append(String.format("(%s)-[:WAITS_FOR]->(%s)->[:HELD_BY]->", link.owner, link.lock));
+            sb.append(String.format("(%s)-[:WAITS_FOR]->(%s %s)->[:BLOCKED_BY]->", aliases.alias(link.owner), link.lockMode, link.lock));
         }
         sb.append(String.format("(%s)", chain[chain.length-1].owner));
-        return sb.append("]").toString();
+        return sb.append("\n")
+                .append("Where:\n")
+                .append(aliases.describe())
+                .toString();
     }
 
     private static boolean assertIsValidDeadlockChain(F2ClientEntry[] chain) {
@@ -99,6 +101,25 @@ class DeadlockDescription {
             assert isHoldingSharedLock: String.format("Expected %s to hold shared or exclusive lock on %s. " +
                     "Exclusive holder is %s, shared holder HEAD is %s",
                     expectedHolder, lock, lock.exclusiveHolder, lock.sharedHolderList);
+        }
+    }
+
+    private static class ClientAliaser {
+        private final static String[] aliases = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+        private final HashMap<F2Client, String> clients = new HashMap<>();
+        private final StringBuilder aliasDescription = new StringBuilder();
+
+        String alias(F2Client client) {
+            if(!clients.containsKey(client)) {
+                String alias = clients.size() < aliases.length ? aliases[clients.size()] : String.format("X%d", clients.size());
+                clients.put(client, alias);
+                aliasDescription.append("  ").append(alias).append(": ").append(client.name()).append("\n");
+            }
+            return clients.get(client);
+        }
+
+        String describe() {
+            return aliasDescription.toString();
         }
     }
 }

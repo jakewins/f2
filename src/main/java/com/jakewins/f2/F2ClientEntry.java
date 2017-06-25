@@ -2,8 +2,6 @@ package com.jakewins.f2;
 
 import org.neo4j.storageengine.api.lock.ResourceType;
 
-import java.util.Arrays;
-
 /** Tracks one client's holding, or attempt of holding, of one lock */
 class F2ClientEntry {
     /** Owner of this entry */

@@ -329,4 +329,8 @@ class F2Client implements Locks.Client {
         }
         partition.releaseClientEntry(entry);
     }
+
+    public String name() {
+        return name;
+    }
 }

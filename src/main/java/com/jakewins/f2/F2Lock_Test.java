@@ -393,4 +393,12 @@ public class F2Lock_Test {
         return entry;
     }
 
+    static F2ClientEntry newEntry(F2Client owner, LockMode lockMode, F2Lock lock) {
+        F2ClientEntry entry = new F2ClientEntry();
+        entry.owner = owner;
+        entry.lockMode = lockMode;
+        entry.lock = lock;
+        return entry;
+    }
+
 }
