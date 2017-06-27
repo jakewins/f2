@@ -10,11 +10,13 @@
 
     <dependencies>
         <dependency>
+            <!-- Included to get JMH to be happy; marked 'provided' via profile for actual distribution -->
             <groupId>org.openjdk.jmh</groupId>
             <artifactId>jmh-core</artifactId>
             <version>${jmh.version}</version>
         </dependency>
         <dependency>
+            <!-- Included to get JMH to be happy; marked 'provided' via profile for actual distribution -->
             <groupId>org.neo4j</groupId>
             <artifactId>neo4j-enterprise</artifactId>
             <version>3.3.0-alpha01</version>
@@ -38,7 +40,73 @@
         <jmh.version>1.19</jmh.version>
         <javac.target>1.8</javac.target>
         <uberjar.name>f2</uberjar.name>
+        <build.extension></build.extension>
     </properties>
+
+    <profiles>
+        <profile>
+            <id>build-extension</id>
+            <dependencies>
+                <!-- Don't bundle Neo4j or JMH in the main extension distribution -->
+                <dependency>
+                    <groupId>org.openjdk.jmh</groupId>
+                    <artifactId>jmh-core</artifactId>
+                    <version>${jmh.version}</version>
+                    <scope>provided</scope>
+                </dependency>
+                <dependency>
+                    <groupId>org.neo4j</groupId>
+                    <artifactId>neo4j-enterprise</artifactId>
+                    <version>3.3.0-alpha01</version>
+                    <scope>provided</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <version>2.3</version>
+                        <executions>
+                            <execution>
+                                <id>neo4j-extension</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>shade</goal>
+                                </goals>
+                                <configuration>
+                                    <finalName>${uberjar.name}</finalName>
+                                    <transformers>
+                                        <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                    </transformers>
+                                    <filters>
+                                        <filter>
+                                            <artifact>*:*</artifact>
+                                            <excludes>
+                                                <!--
+                                                    Don't include tests in the distribution
+                                                -->
+                                                <exclude>**/*_Test*</exclude>
+                                                <exclude>**/*_PerfTest*</exclude>
+
+                                                <!--
+                                                    Shading signed JARs will fail without this.
+                                                    http://stackoverflow.com/questions/999489/invalid-signature-file-when-attempting-to-run-a-jar
+                                                -->
+                                                <exclude>META-INF/*.SF</exclude>
+                                                <exclude>META-INF/*.DSA</exclude>
+                                                <exclude>META-INF/*.RSA</exclude>
+                                            </excludes>
+                                        </filter>
+                                    </filters>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
     <build>
         <plugins>
@@ -70,12 +138,13 @@
                 <version>2.2</version>
                 <executions>
                     <execution>
+                        <id>jmh-jar</id>
                         <phase>package</phase>
                         <goals>
                             <goal>shade</goal>
                         </goals>
                         <configuration>
-                            <finalName>${uberjar.name}</finalName>
+                            <finalName>f2-jmh</finalName>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>org.openjdk.jmh.Main</mainClass>

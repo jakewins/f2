@@ -26,7 +26,10 @@ class F2Partition {
     private final PrimitiveLongObjectMap<F2Lock>[] locks;
 
     F2Partition(int partitionIndex, int numResourceTypes) {
-        assert Long.bitCount(numResourceTypes) == 1 : "numResourceTypes must be power of two.";
+        // numResourceTypes must be a power of two; so if the input isn't, round it up to the nearest one
+        if (Long.bitCount(numResourceTypes) != 1) {
+            numResourceTypes = (int) Math.pow(2, Math.ceil(Math.log(numResourceTypes) / Math.log(2)));
+        }
 
         this.partitionIndex = partitionIndex;
         this.locks = new PrimitiveLongObjectMap[numResourceTypes];
