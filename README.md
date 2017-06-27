@@ -21,6 +21,10 @@ here means more memory overhead but less contention:
 
 The partition number must be a factor of 2.
 
+## Building
+
+    mvn package -P 
+
 ## Overview
 
 F2 is a partitioned lock manager, allowing concurrent work to happen in separate partitions, but
