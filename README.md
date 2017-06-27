@@ -1,57 +1,41 @@
 # F2
 
-A concurrent lock manager with automatic deadlock detection.
+An experimental lock manager for Neo4j 3.2.x and 3.3.x.
+
+[quote]
+#Notice
+This is a personal proof of concept, it is not in any way supported by Neo Technology or anyone else.
+This code is not production ready. Bugs in here may cause irrecoverable data corruption, use at your own risk.
+[/quote]
+
+## Usage
+
+- Put `f2.jar` in the `plugins` directory of your Neo4j 3.2.x or 3.3.x system.
+- Add `unsupported.dbms.lock_manager=f2` to your `neo4j.conf`
+- Restart Neo4j
+
+## Configuration
+
+F2 provides one configuration option to tune the number of partitions to use, a higher number 
+here means more memory overhead but less contention:
+
+    unsupported.dbms.f2.partitions=128
+
+The partition number must be a factor of 2.
 
 ## Overview
 
+F2 is a partitioned lock manager, allowing concurrent work to happen in separate partitions, but
+ordering accesses within one partition using a semaphore. 
+
+F2 offers several nice features:
+
+- Deterministic deadlock detection with no false positives
+- Exact deadlock descriptions
+- Thread notification-based waiting, using substantially less system resources than Forseti
+
 Good place to start reading is in [F2Client#acquire](src/main/java/com/jakewins/f2/F2Client.java).
 
+## License
 
-The design is inspired by the lock manager in postgres; the locks are grouped into partitions, and each partition
-is guarded by a stamped lock.
-
-Acquiring a shared lock roughly consists of:
-
-    # Entry to represent our relationship to the lock (held exclusively, held shared, on waitlist)
-    lockEntry = newLockEntry()
-    
-    partition = partitions[resourceId % len(partitions)]
-    
-    patition.partitionLock.acquire()
-    
-    lock = partition.getLock(resourceId)  # Hashmap lookup
-    
-    if lock.exclusiveHolder == null:
-        # If there is no exclusive holder, add a record for us in the shared holder list
-        lockEntry.next = lock.sharedList
-        lock.sharedList = lockEntry
-        
-        partition.partitionLock.release()
-        return
-        
-    # If there is a shared holder, add ourselves to wait list and wait to be signalled
-    lockEntry.next = lock.waitList
-    lock.waitList = lockEntry
-    
-    partition.partitionLock.release()
-    waitForSignal()
-    return
- 
- 
-## Performance
-
-Way too early to tell, but there are some interesting indications. There's a JMH microbenchmark for testing some of the
-primitives and comparing them to Forseti. For acquiring/releasing a single shared lock with CPUS * 4 threads:
-
-    Benchmark                                        Mode  Cnt     Score      Error   Units
-    F2Locks_PerfTest.f2AcquireContendedShared       thrpt    5  6995.419 ±  809.099  ops/ms
-    F2Locks_PerfTest.forsetiAcquireContendedShared  thrpt    5  5496.916 ± 1980.028  ops/ms
-    
-There's a *very* interesting note from running this; since Forseti is doing a spin/backoff wait, while F2 is waiting for
-a notify to get back to work, F2 uses almost no CPU.
-
-Under a real world load, someone holding a lock can be expected to want to use (some) CPU; having waiters eat that CPU
-up is no good, so the F2 approach could have some good outcomes.
-
-Trying to benchmark exclusive locks highlighted a bug in the deadlock detector (infinite recursion..), so that'll have
-to wait until tomorrow.
+AGPL
