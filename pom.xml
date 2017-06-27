@@ -6,7 +6,7 @@
 
     <groupId>com.jakewins</groupId>
     <artifactId>f2</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>0.0.1</version>
 
     <dependencies>
         <dependency>
