@@ -8,7 +8,7 @@ An experimental lock manager for Neo4j 3.2.x and 3.3.x.
 
 ## Usage
 
-- Put `f2.jar` in the `plugins` directory of your Neo4j 3.2.x or 3.3.x system.
+- Put [f2.jar](https://github.com/jakewins/f2/releases/download/0.0.1/f2.jar) in the `plugins` directory of your Neo4j 3.2.x or 3.3.x system.
 - Add `unsupported.dbms.lock_manager=f2` to your `neo4j.conf`
 - Restart Neo4j
 
