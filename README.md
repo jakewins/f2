@@ -1,5 +1,7 @@
 # F2
 
+[![Build Status](https://travis-ci.org/jakewins/f2.svg?branch=master)](https://travis-ci.org/jakewins/f2)
+
 An experimental lock manager for Neo4j 3.2.x and 3.3.x.
 
 > ### NOTE
