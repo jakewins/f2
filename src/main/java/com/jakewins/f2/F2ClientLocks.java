@@ -2,10 +2,13 @@ package com.jakewins.f2;
 
 import org.neo4j.collection.primitive.Primitive;
 import org.neo4j.collection.primitive.PrimitiveLongObjectMap;
+import org.neo4j.kernel.impl.locking.ActiveLock;
 import org.neo4j.storageengine.api.lock.ResourceType;
 
+import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * Tracks the locks held by a single client, managing the logic of combining that state with requests to release
@@ -130,6 +133,57 @@ class F2ClientLocks {
                 return false;
             });
             locks.clear();
+        }
+    }
+
+    Stream<? extends ActiveLock> asStream() {
+        return Arrays.asList(locksByResourceType)
+                .stream()
+                .flatMap((locks) -> {
+                    LinkedList<ActiveLock> found = new LinkedList<>();
+                    locks.visitEntries( (resourceId, entry) -> {
+                        found.add(F2ActiveLock.fromEntry(entry));
+                        return false;
+                    });
+                    return found.stream();
+                });
+    }
+
+    long activeLockCount() {
+        return Arrays.asList(locksByResourceType)
+                .stream()
+                .mapToInt((locks) -> locks.size())
+                .sum();
+    }
+
+    private static class F2ActiveLock implements ActiveLock {
+        private final String mode;
+        private final ResourceType resourceType;
+        private final long resourceId;
+
+        static F2ActiveLock fromEntry(F2ClientEntry entry) {
+            return new F2ActiveLock(entry.lockMode.name(), entry.resourceType, entry.resourceId);
+        }
+
+        F2ActiveLock(String mode, ResourceType resourceType, long resourceId) {
+            this.mode = mode;
+            this.resourceType = resourceType;
+            this.resourceId = resourceId;
+        }
+
+        @Override
+        public String mode() {
+            return mode;
+        }
+
+        @Override
+        public ResourceType resourceType() {
+            return resourceType;
+        }
+
+        @Override
+        public long resourceId() {
+            return resourceId;
         }
     }
 }

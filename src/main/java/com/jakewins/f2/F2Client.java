@@ -4,6 +4,7 @@ import com.jakewins.f2.F2Lock.AcquireOutcome;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import com.jakewins.f2.infrastructure.SingleWaiterLatch;
@@ -48,6 +49,7 @@ class ClientAcquireError extends ClientAcquireOutcome {
 
 class F2Client implements Locks.Client {
     private static final int CHECK_DEADLOCK_AFTER_MS = 1000;
+    private static AtomicInteger ID_GEN = new AtomicInteger();
 
     /** Signal when client is granted a lock it is waiting on */
     SingleWaiterLatch latch = new SingleWaiterLatch();
@@ -60,6 +62,7 @@ class F2Client implements Locks.Client {
      */
     F2ClientEntry waitsFor;
 
+    private int clientId = ID_GEN.incrementAndGet();
     private String name;
 
     private final F2Partitions partitions;
@@ -70,10 +73,6 @@ class F2Client implements Locks.Client {
         this.partitions = partitions;
         this.deadlockDetector = deadlockDetector;
         this.heldLocks = new F2ClientLocks(numResourceTypes);
-    }
-
-    void setName(String name) {
-        this.name = name;
     }
 
     @Override
@@ -92,7 +91,7 @@ class F2Client implements Locks.Client {
         }
     }
 
-    private void handleAcquireOutcome(ClientAcquireOutcome outcome) {
+    private static void handleAcquireOutcome(ClientAcquireOutcome outcome) {
         if(outcome == ClientAcquireOutcome.ACQUIRED || outcome == ClientAcquireOutcome.NOT_ACQUIRED) {
             return;
         }
@@ -126,18 +125,12 @@ class F2Client implements Locks.Client {
 
     @Override
     public boolean reEnterShared(ResourceType resourceType, long resourceId) {
-        throw new UnsupportedOperationException("Sorry.");
+        return heldLocks.tryLocalAcquire(resourceType, resourceId, LockMode.SHARED) == LockMode.NONE;
     }
 
     @Override
     public boolean reEnterExclusive(ResourceType resourceType, long resourceId) {
-        throw new UnsupportedOperationException("Sorry.");
-    }
-
-
-    @Override
-    public void stop() {
-        throw new UnsupportedOperationException("Sorry.");
+        return heldLocks.tryLocalAcquire(resourceType, resourceId, LockMode.EXCLUSIVE) == LockMode.NONE;
     }
 
     @Override
@@ -165,22 +158,38 @@ class F2Client implements Locks.Client {
         }
     }
 
+    @Override
     public int getLockSessionId() {
-        throw new UnsupportedOperationException("Sorry.");
+        return clientId;
     }
 
     @Override
     public Stream<? extends ActiveLock> activeLocks() {
-        return null;
+        return heldLocks.asStream();
     }
 
+    @Override
     public long activeLockCount() {
-        throw new UnsupportedOperationException("Sorry.");
+        return heldLocks.activeLockCount();
     }
 
     @Override
     public String toString() {
         return name;
+    }
+
+    public String name() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    // TODO
+    @Override
+    public void stop() {
+        throw new UnsupportedOperationException("Out-of-band interrupting F2 locks is not yet implemented.");
     }
 
     private ClientAcquireOutcome acquire(AcquireMode acquireMode, LockMode requestedLockMode, ResourceType resourceType, long resourceId) {
@@ -328,9 +337,5 @@ class F2Client implements Locks.Client {
             partition.removeLock(resourceType, resourceId);
         }
         partition.releaseClientEntry(entry);
-    }
-
-    public String name() {
-        return name;
     }
 }
