@@ -2,11 +2,9 @@
 
 An experimental lock manager for Neo4j 3.2.x and 3.3.x.
 
-[quote]
-#Notice
-This is a personal proof of concept, it is not in any way supported by Neo Technology or anyone else.
-This code is not production ready. Bugs in here may cause irrecoverable data corruption, use at your own risk.
-[/quote]
+> # NOTE
+> This is a personal proof of concept, it is not in any way supported by Neo Technology or anyone else.
+> This code is not production ready. Bugs in here may cause irrecoverable data corruption, use at your own risk.
 
 ## Usage
 
