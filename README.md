@@ -34,6 +34,22 @@ F2 offers several nice features:
 
 Good place to start reading is in [F2Client#acquire](src/main/java/com/jakewins/f2/F2Client.java).
 
+## Performance
+
+Please see [F2Locks_PerfTest](src/main/java/com/jakewins/f2/F2Locks_PerfTest.java) for micro benchmarks.
+
+Performance compared to Forseti at `d69c50c` on `Intel(R) Core(TM) i7-6600U CPU @ 2.60GHz`:
+
+    Benchmark                                             Mode  Cnt     Score      Error   Units
+    F2Locks_PerfTest.f2AcquireContendedExclusive         thrpt    5   528.829 ±   89.808  ops/ms
+    F2Locks_PerfTest.forsetiAcquireContendedExclusive    thrpt    5  1213.495 ±  252.209  ops/ms
+    
+    F2Locks_PerfTest.f2AcquireContendedShared            thrpt    5  9645.799 ± 1132.557  ops/ms
+    F2Locks_PerfTest.forsetiAcquireContendedShared       thrpt    5  5540.280 ± 1330.020  ops/ms
+    
+    F2Locks_PerfTest.f2SchemaExclusiveCombintation       thrpt    5    12.366 ±   30.350  ops/ms
+    F2Locks_PerfTest.forsetiSchemaExclusiveCombintation  thrpt    5     6.329 ±    2.242  ops/ms
+
 ## License
 
 AGPL

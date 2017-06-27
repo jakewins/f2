@@ -48,38 +48,38 @@ public class F2Locks_PerfTest {
         Thread.currentThread().setName("CLIENT " + this.f2Client);
     }
 
-//    @Benchmark
-//    public void f2AcquireContendedShared() throws AcquireLockTimeoutException {
-//        f2Client.acquireShared(LockTracer.NONE, NODE, 0);
-//        f2Client.releaseShared(NODE, 0);
-//    }
-//
-//    @Benchmark
-//    public void forsetiAcquireContendedShared() throws AcquireLockTimeoutException {
-//        forsetiClient.acquireShared(LockTracer.NONE, NODE, 0);
-//        forsetiClient.releaseShared(NODE, 0);
-//    }
-//
-//    @Benchmark
-//    public void f2AcquireContendedExclusive() throws AcquireLockTimeoutException {
-//        f2Client.acquireExclusive(LockTracer.NONE, NODE, 0);
-//        f2Client.releaseExclusive(NODE, 0);
-//    }
-//
-//    @Benchmark
-//    public void forsetiAcquireContendedExclusive() throws AcquireLockTimeoutException {
-//        for(;;) {
-//            try {
-//                forsetiClient.acquireExclusive(LockTracer.NONE, NODE, 0);
-//                forsetiClient.releaseExclusive(NODE, 0);
-//                return;
-//            } catch (DeadlockDetectedException e) {
-//                // This use case can't deadlock, but Forseti finds false positives.
-//                // Correct for this by forcing Forseti to keep going until it actually acquires and releases the
-//                // lock once.
-//            }
-//        }
-//    }
+    @Benchmark
+    public void f2AcquireContendedShared() throws AcquireLockTimeoutException {
+        f2Client.acquireShared(LockTracer.NONE, NODE, 0);
+        f2Client.releaseShared(NODE, 0);
+    }
+
+    @Benchmark
+    public void forsetiAcquireContendedShared() throws AcquireLockTimeoutException {
+        forsetiClient.acquireShared(LockTracer.NONE, NODE, 0);
+        forsetiClient.releaseShared(NODE, 0);
+    }
+
+    @Benchmark
+    public void f2AcquireContendedExclusive() throws AcquireLockTimeoutException {
+        f2Client.acquireExclusive(LockTracer.NONE, NODE, 0);
+        f2Client.releaseExclusive(NODE, 0);
+    }
+
+    @Benchmark
+    public void forsetiAcquireContendedExclusive() throws AcquireLockTimeoutException {
+        for(;;) {
+            try {
+                forsetiClient.acquireExclusive(LockTracer.NONE, NODE, 0);
+                forsetiClient.releaseExclusive(NODE, 0);
+                return;
+            } catch (DeadlockDetectedException e) {
+                // This use case can't deadlock, but Forseti finds false positives.
+                // Correct for this by forcing Forseti to keep going until it actually acquires and releases the
+                // lock once.
+            }
+        }
+    }
 
     @Benchmark
     public void f2SchemaExclusiveCombintation(SharedState shared) throws AcquireLockTimeoutException {
@@ -107,7 +107,6 @@ public class F2Locks_PerfTest {
             }
         }
     }
-
 
     public static void main(String[] args) throws RunnerException {
         Options opt = new OptionsBuilder()
