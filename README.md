@@ -23,7 +23,7 @@ The partition number must be a factor of 2.
 
 ## Building
 
-    mvn package -P 
+    mvn clean package -P build-extension
 
 ## Overview
 
